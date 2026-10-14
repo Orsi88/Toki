@@ -136,25 +136,25 @@ button { cursor: pointer; }
 .hero h1 {
   position: relative; z-index: 1; margin: 0; max-width: 12em; padding: 0 24px;
   text-align: center; font-family: "Instrument Serif", Georgia, serif;
-  font-size: clamp(44px, 6vw, 76px); font-weight: 400; line-height: 1.05;
+  font-size: clamp(38px, 5.2vw, 64px); font-weight: 400; line-height: 1.05;
   color: #ead9a0;
   text-shadow:
     0 0 6px rgba(255, 228, 160, .32),
     0 0 16px rgba(255, 206, 110, .16);
 }
 .hero-start {
-  position: absolute; z-index: 1; left: 50%; bottom: 48px; transform: translateX(-50%);
-  background: #ead9a0; color: #34532f; border: 0; border-radius: 999px;
-  padding: 14px 32px; font-size: 17px; font-weight: 650;
-  box-shadow:
-    0 0 10px rgba(255, 228, 160, .28),
-    0 0 22px rgba(255, 206, 110, .14);
+  position: absolute; z-index: 1; left: 50%; bottom: 36px; transform: translateX(-50%);
+  width: 44px; height: 44px; padding: 0;
+  display: grid; place-items: center;
+  background: none; border: 0; color: #f7f4ee;
+  filter: drop-shadow(0 2px 6px rgba(20, 28, 16, .45));
+  animation: hero-bob 1.8s ease-in-out infinite;
 }
-.hero-start:hover {
-  background: #f3e6b4; color: #34532f;
-  box-shadow:
-    0 0 12px rgba(255, 228, 160, .4),
-    0 0 26px rgba(255, 206, 110, .2);
+.hero-start svg { width: 30px; height: 30px; }
+.hero-start:hover { color: #ead9a0; }
+@keyframes hero-bob {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(6px); }
 }
 .falling-block {
   position: fixed; z-index: 25; width: 58px; height: 58px;
@@ -662,4 +662,5 @@ html[data-theme="dark"] .composer select {
 }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; }
+  .hero-start { animation: none; }
 }

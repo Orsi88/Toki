@@ -222,8 +222,10 @@ export default function App() {
           <section className="hero">
             <img src="/golden-hour.png" alt="Prado em voxel ao fim da tarde" />
             <h1>O que você vai testar hoje?</h1>
-            <button type="button" className="hero-start" onClick={scrollHome}>
-              Começar
+            <button type="button" className="hero-start" aria-label="Começar" onClick={scrollHome}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 9.5 12 15.5 18 9.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </button>
           </section>
         )}

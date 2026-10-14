@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CATS, ENG, FAM } from './domain/mfEngine.ts'
+import type { Notice } from './ui/browser.ts'
 import { ComposerPage } from './pages/ComposerPage.tsx'
 import { CustomPage } from './pages/CustomPage.tsx'
 import { FilesPage } from './pages/FilesPage.tsx'
@@ -102,7 +103,7 @@ function parseRoute(hash: string) {
 export default function App() {
   const [hash, setHash] = useState(() => window.location.hash || '#/')
   const [search, setSearch] = useState('')
-  const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null)
+  const [toast, setToast] = useState<Notice | null>(null)
   const [theme, setTheme] = useState<'light' | 'dark'>(() => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light')
   const route = parseRoute(hash)
   const categories = CATS as Category[]
@@ -125,7 +126,7 @@ export default function App() {
 
   useEffect(() => {
     if (!toast) return
-    const timer = window.setTimeout(() => setToast(null), 2200)
+    const timer = window.setTimeout(() => setToast(null), toast.detail || toast.bad ? 4200 : 2200)
     return () => window.clearTimeout(timer)
   }, [toast])
 
@@ -162,8 +163,8 @@ export default function App() {
     return found.slice(0, 8)
   }, [categories, search])
 
-  function notify(text: string, bad?: boolean) {
-    setToast({ text, bad })
+  function notify(message: string | Notice, bad?: boolean) {
+    setToast(typeof message === 'string' ? { title: message, bad } : message)
   }
 
   function go(href: string) {
@@ -291,7 +292,17 @@ export default function App() {
         {route.page === 'custom' && <CustomPage onToast={notify} />}
         </div>
       </main>
-      {toast ? <div className="toast" role="status">{toast.text}</div> : null}
+      {toast ? (
+        <div className={`toast${toast.bad ? ' bad' : ''}`} role="status">
+          <div>
+            <strong>{toast.title}</strong>
+            {toast.detail ? <p>{toast.detail}</p> : null}
+          </div>
+          <button type="button" aria-label="Fechar aviso" onClick={() => setToast(null)}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }

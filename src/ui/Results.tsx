@@ -1,6 +1,8 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { GeneratedItem } from '../domain/export.ts'
 import { displayValue } from '../domain/export.ts'
+import { mapEmbed } from '../domain/geo.ts'
+import { parseColor } from '../domain/values.ts'
 import { Barcode, QrMark } from './codes.tsx'
 import { CopyButton } from './CopyButton.tsx'
 
@@ -53,7 +55,7 @@ function FieldStack({ item, onCopy }: { item: GeneratedItem; onCopy: (value: str
       {item.fields.map((field) => (
         <div key={field.key} className="copy-row">
           <span>{field.k}</span>
-          <strong>{displayValue(field.v)}</strong>
+          <strong>{parseColor(field.v) && field.key === 'valor' ? <i className="swatch" style={{ background: field.v }} /> : null}{displayValue(field.v)}</strong>
           <CopyButton label={`Copiar ${field.k}`} onCopy={() => onCopy(field.v)} />
         </div>
       ))}
@@ -271,6 +273,33 @@ function Sheet({ items, onCopy }: { items: GeneratedItem[]; onCopy: (value: stri
         </tbody>
       </table>
       {items.length > visible.length ? <p className="muted">Exibindo {visible.length} de {items.length}. Baixar CSV inclui todos.</p> : null}
+    </div>
+  )
+}
+
+export function CoordinateMap({ items }: { items: GeneratedItem[] }) {
+  const [index, setIndex] = useState(0)
+  const current = Math.min(index, Math.max(items.length - 1, 0))
+  const item = items[current]
+  const link = item ? valueOf(item, 'mapa') : ''
+  const src = mapEmbed(link)
+  const value = item ? valueOf(item, 'valor') : ''
+  return (
+    <div className="map-section">
+      {items.length > 1 ? (
+        <label className="field map-line">
+          <span>Linha</span>
+          <select value={current} onChange={(event) => setIndex(Number(event.target.value))}>
+            {items.map((row, rowIndex) => (
+              <option key={`${row.rule}-${rowIndex}`} value={rowIndex}>
+                {String(rowIndex + 1).padStart(2, '0')} · {valueOf(row, 'valor')}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {src ? <iframe className="map-frame" title={`Mapa da linha ${current + 1}`} src={src} loading="lazy" referrerPolicy="no-referrer-when-downgrade" /> : <p className="muted">{link || 'Sem coordenada para abrir no mapa.'}</p>}
+      {item ? <p className="muted">Linha {String(current + 1).padStart(2, '0')} · {value} · {item.tag}</p> : null}
     </div>
   )
 }

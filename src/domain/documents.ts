@@ -14,6 +14,25 @@ export type DocMeta = {
 }
 
 const LIMITS = { paragraphs: 400, rows: 2000, cells: 20000 }
+const WATERMARK_FILE = 'marca-dagua-bloco-1254x1254-verde-claro-transparente.png'
+
+let watermarkBytes: Promise<Uint8Array> | undefined
+
+function loadWatermark() {
+  watermarkBytes ??= readWatermark()
+  return watermarkBytes
+}
+
+async function readWatermark() {
+  if (import.meta.env.VITEST) {
+    const { readFile } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    return new Uint8Array(await readFile(join(process.cwd(), 'public', 'imagens', WATERMARK_FILE)))
+  }
+  const response = await fetch(`/imagens/${WATERMARK_FILE}`)
+  if (!response.ok) throw new Error('Não foi possível carregar a marca d’água.')
+  return new Uint8Array(await response.arrayBuffer())
+}
 
 function xml(value: unknown) {
   return String(value ?? '')
@@ -151,10 +170,8 @@ async function buildDocx(options: { components: DocComponent[]; meta: DocMeta; s
     if (!options.imagePng) throw new Error('A imagem de exemplo não foi carregada.')
     imageId = nextRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/image', 'media/image.png')
   }
-  let headerId = ''
-  let footerId = ''
-  if (header) headerId = nextRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/header', 'header1.xml')
-  if (footer) footerId = nextRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer', 'footer1.xml')
+  const headerId = nextRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/header', 'header1.xml')
+  const footerId = footer ? nextRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer', 'footer1.xml') : ''
   const comments = options.components.filter((component) => component.type === 'comentario')
   let commentId = ''
   if (comments.length) commentId = nextRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments', 'comments.xml')
@@ -230,21 +247,27 @@ async function buildDocx(options: { components: DocComponent[]; meta: DocMeta; s
     '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>',
     '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>',
   ]
-  if (headerId) overrides.push('<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>')
+  overrides.push('<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>')
   if (footerId) overrides.push('<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>')
   if (comments.length) overrides.push('<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>')
-  const defaults = ['<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>', '<Default Extension="xml" ContentType="application/xml"/>']
-  if (imageId) defaults.push('<Default Extension="png" ContentType="image/png"/>')
+  const defaults = [
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+    '<Default Extension="png" ContentType="image/png"/>',
+  ]
   zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">${defaults.join('')}${overrides.join('')}</Types>`)
   zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`)
   zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels.join('')}</Relationships>`)
   zip.file('word/document.xml', document)
   zip.file('word/styles.xml', wordStyles())
   zip.file('docProps/core.xml', coreProps(options.meta))
-  if (header) zip.file('word/header1.xml', partXml(wParagraph(String(header.props.texto || ''))))
+  const contentWidth = size.w - 2268
+  const watermark = await loadWatermark()
+  zip.file('word/media/watermark.png', watermark)
+  zip.file('word/_rels/header1.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdMark" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/watermark.png"/></Relationships>`)
+  zip.file('word/header1.xml', headerXml(`${wordWatermark()}${letterheadLine(String(header?.props.texto || ''), contentWidth)}`))
   if (footer) {
-    const number = footer.props.num !== false ? '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>' : ''
-    zip.file('word/footer1.xml', partXml(`<w:p><w:r><w:t xml:space="preserve">${xml(footer.props.texto || '')} </w:t></w:r>${number}</w:p>`))
+    zip.file('word/footer1.xml', footerXml(letterheadFooter(String(footer.props.texto || ''), footer.props.num !== false, contentWidth)))
   }
   if (comments.length) {
     const author = String(comments[0].props.autor || options.meta.autor || 'QA')
@@ -263,8 +286,64 @@ async function buildDocx(options: { components: DocComponent[]; meta: DocMeta; s
   }
 }
 
-function partXml(inner: string) {
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${inner}</w:hdr>`.replace('<w:hdr', inner.includes('PAGE') ? '<w:ftr' : '<w:hdr').replace(/<\/w:hdr>$/, inner.includes('PAGE') ? '</w:ftr>' : '</w:hdr>')
+function headerXml(inner: string) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">${inner}</w:hdr>`
+}
+
+function footerXml(inner: string) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${inner}</w:ftr>`
+}
+
+function letterheadAside(text: string) {
+  const raw = text.trim()
+  const parts = raw.split(/\s*·\s*/)
+  const branded = parts.length > 1 && parts[0].localeCompare('MassForge', 'pt-BR', { sensitivity: 'accent' }) === 0
+  const aside = branded ? parts.slice(1).join(' · ') : raw
+  if (!aside || aside.localeCompare('MassForge', 'pt-BR', { sensitivity: 'accent' }) === 0) return ''
+  return aside
+}
+
+function letterheadLine(text: string, width: number) {
+  const aside = letterheadAside(text)
+  const tab = aside ? `<w:tabs><w:tab w:val="right" w:pos="${width}"/></w:tabs>` : ''
+  const asideRun = aside
+    ? `<w:r><w:tab/></w:r><w:r><w:rPr><w:color w:val="676B66"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:t>${xml(aside)}</w:t></w:r>`
+    : ''
+  return `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="12" w:space="1" w:color="34532F"/></w:pBdr>${tab}<w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Georgia" w:hAnsi="Georgia" w:cs="Georgia"/><w:color w:val="34532F"/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr><w:t>MassForge</w:t></w:r>${asideRun}</w:p>`
+}
+
+function letterheadFooter(text: string, numbered: boolean, width: number) {
+  const tab = numbered ? `<w:tabs><w:tab w:val="right" w:pos="${width}"/></w:tabs>` : ''
+  const number = numbered
+    ? `<w:r><w:tab/></w:r><w:r><w:rPr><w:color w:val="34532F"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:rPr><w:color w:val="34532F"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:rPr><w:color w:val="34532F"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:fldChar w:fldCharType="end"/></w:r>`
+    : ''
+  return `<w:p><w:pPr><w:pBdr><w:top w:val="single" w:sz="6" w:space="1" w:color="A9BF9C"/></w:pBdr>${tab}</w:pPr><w:r><w:rPr><w:color w:val="676B66"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:t xml:space="preserve">${xml(text)}</w:t></w:r>${number}</w:p>`
+}
+
+function wordWatermark() {
+  const side = 3840480
+  return `<w:p><w:r><w:drawing>
+    <wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251659264" behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1">
+      <wp:simplePos x="0" y="0"/>
+      <wp:positionH relativeFrom="page"><wp:align>center</wp:align></wp:positionH>
+      <wp:positionV relativeFrom="page"><wp:align>center</wp:align></wp:positionV>
+      <wp:extent cx="${side}" cy="${side}"/>
+      <wp:effectExtent l="0" t="0" r="0" b="0"/>
+      <wp:wrapNone/>
+      <wp:docPr id="1" name="Marca dagua"/>
+      <wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>
+      <a:graphic>
+        <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+          <pic:pic>
+            <pic:nvPicPr><pic:cNvPr id="1" name="${WATERMARK_FILE}"/><pic:cNvPicPr><a:picLocks noChangeAspect="1"/></pic:cNvPicPr></pic:nvPicPr>
+            <pic:blipFill><a:blip r:embed="rIdMark"><a:alphaModFix amt="85000"/></a:blip><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+            <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${side}" cy="${side}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>
+          </pic:pic>
+        </a:graphicData>
+      </a:graphic>
+    </wp:anchor>
+  </w:drawing></w:r></w:p>`
 }
 
 function wordStyles() {
@@ -635,26 +714,60 @@ async function buildPdf(options: { components: DocComponent[]; meta: DocMeta; se
   const header = options.components.find((component) => component.type === 'cabecalho')
   const footer = options.components.find((component) => component.type === 'rodape')
   const margin = 48
+  const bodyTop = () => size.height - 56
   let page = doc.addPage([size.width, size.height])
-  let y = size.height - margin
+  let y = bodyTop()
   const pages = [page]
+  const markPng = await doc.embedPng(await loadWatermark())
+  const paintMark = (target: typeof page) => {
+    const side = Math.min(size.width, size.height) * 0.62
+    target.drawImage(markPng, {
+      x: (size.width - side) / 2,
+      y: (size.height - side) / 2,
+      width: side,
+      height: side,
+      opacity: 0.9,
+    })
+  }
+  paintMark(page)
   const paintChrome = (target: typeof page, index: number) => {
-    if (header) {
-      target.drawText(pdfSafe(String(header.props.texto || '')), { x: margin, y: size.height - 28, size: 9, font, color: rgb(0.2, 0.32, 0.18) })
+    const top = size.height - 28
+    target.drawText('MassForge', { x: margin, y: top, size: 11, font: bold, color: rgb(0.2, 0.33, 0.18) })
+    const aside = letterheadAside(header ? String(header.props.texto || '') : '')
+    if (aside) {
+      const safe = pdfSafe(aside)
+      const width = font.widthOfTextAtSize(safe, 9)
+      target.drawText(safe, { x: size.width - margin - width, y: top + 1, size: 9, font, color: rgb(0.4, 0.42, 0.4) })
     }
+    target.drawLine({
+      start: { x: margin, y: size.height - 36 },
+      end: { x: size.width - margin, y: size.height - 36 },
+      thickness: 1,
+      color: rgb(0.2, 0.33, 0.18),
+    })
     if (footer) {
-      const label = `${footer.props.texto || ''}${footer.props.num !== false ? `  ${index + 1}` : ''}`
-      target.drawText(pdfSafe(label), { x: margin, y: 24, size: 9, font, color: rgb(0.35, 0.35, 0.33) })
+      target.drawLine({
+        start: { x: margin, y: 36 },
+        end: { x: size.width - margin, y: 36 },
+        thickness: 0.6,
+        color: rgb(0.66, 0.75, 0.61),
+      })
+      target.drawText(pdfSafe(String(footer.props.texto || '')), { x: margin, y: 22, size: 9, font, color: rgb(0.4, 0.42, 0.4) })
+      if (footer.props.num !== false) {
+        const num = String(index + 1)
+        const width = bold.widthOfTextAtSize(num, 9)
+        target.drawText(num, { x: size.width - margin - width, y: 22, size: 9, font: bold, color: rgb(0.2, 0.33, 0.18) })
+      }
     }
   }
   const need = (height: number) => {
     if (y - height < margin + 20) {
       page = doc.addPage([size.width, size.height])
       pages.push(page)
-      y = size.height - margin - (header ? 16 : 0)
+      paintMark(page)
+      y = bodyTop()
     }
   }
-  if (header) y -= 16
   const write = (text: string, options?: { size?: number; bold?: boolean; gap?: number }) => {
     const sizePx = options?.size ?? 11
     const face = options?.bold ? bold : font
@@ -677,7 +790,8 @@ async function buildPdf(options: { components: DocComponent[]; meta: DocMeta; se
     if (component.type === 'quebra') {
       page = doc.addPage([size.width, size.height])
       pages.push(page)
-      y = size.height - margin - (header ? 16 : 0)
+      paintMark(page)
+      y = bodyTop()
       continue
     }
     if (component.type === 'titulo') write(String(props.texto || options.meta.titulo), { size: props.nivel === 'H3' ? 14 : props.nivel === 'H2' ? 16 : 20, bold: true, gap: 10 })

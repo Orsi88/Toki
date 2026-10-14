@@ -33,3 +33,14 @@ export function downloadBytes(filename: string, bytes: Uint8Array, mime: string)
 export function downloadText(filename: string, text: string, mime = 'text/plain;charset=utf-8') {
   downloadBytes(filename, new TextEncoder().encode(text), mime)
 }
+
+export type Notice = { title: string; detail?: string; bad?: boolean }
+
+export function downloadNotice(filename?: string): Notice {
+  return {
+    title: 'Download iniciado',
+    detail: filename
+      ? `${filename}. Confira a pasta de downloads. O navegador não avisa se o arquivo foi salvo.`
+      : 'Confira a pasta de downloads. O navegador não avisa se o arquivo foi salvo.',
+  }
+}

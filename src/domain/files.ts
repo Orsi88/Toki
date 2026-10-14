@@ -2,18 +2,15 @@ import JSZip from 'jszip'
 import { FAM, FILE_DEF, INERT, REAL, fileInfo, fileName, fmtBytes, rng } from './mfEngine.ts'
 import { buildDocument } from './documents.ts'
 import { sha256 } from './export.ts'
+import { mediaRequestError, realMedia, type MediaRequest } from './media.ts'
 
 export const FILE_BYTE_LIMIT = 8 * 1024 * 1024
 export const FILE_TOTAL_LIMIT = 32 * 1024 * 1024
 export const FILE_COUNT_LIMIT = 100
 
-const TINY_PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (char) => char.charCodeAt(0))
-const TINY_GIF = Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'), (char) => char.charCodeAt(0))
-const TINY_JPG = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])
-
 export type FolderMode = 'raiz' | 'unica' | 'familia' | 'extensao'
 
-export type FileRequest = {
+export type FileRequest = MediaRequest & {
   sel: string[]
   nome: string
   nomeVar: string
@@ -47,6 +44,34 @@ export function sanitizeFolder(value: string) {
 export function familyName(extension: string) {
   const families = FAM as { n: string; exts: string[] }[]
   return families.find((family) => family.exts.includes(extension.toUpperCase()))?.n ?? 'Outros'
+}
+
+export function folderPreview(selected: string[], request: FileRequest) {
+  if (!selected.length) return 'Nenhuma extensão selecionada.'
+  type Branch = { dirs: Map<string, Branch>; files: string[] }
+  const root: Branch = { dirs: new Map(), files: [] }
+  const many = request.qtd > 1
+  for (const extension of selected) {
+    const folder = folderPath(request.folderMode ?? 'raiz', request.folderName ?? 'arquivos_teste', extension)
+    let node = root
+    for (const part of folder.split('/').filter(Boolean)) {
+      const next = node.dirs.get(part) ?? { dirs: new Map(), files: [] }
+      node.dirs.set(part, next)
+      node = next
+    }
+    const name = fileName({ ...request }, extension, '')
+    node.files.push(many ? `${name}  ×${request.qtd}` : name)
+  }
+  const lines: string[] = []
+  const walk = (node: Branch, depth: number) => {
+    for (const [name, child] of node.dirs) {
+      lines.push(`${'  '.repeat(depth)}${name}/`)
+      walk(child, depth + 1)
+    }
+    for (const file of node.files) lines.push(`${'  '.repeat(depth)}${file}`)
+  }
+  walk(root, 0)
+  return lines.join('\n')
 }
 
 export function folderPath(mode: FolderMode, root: string, extension: string) {
@@ -92,24 +117,26 @@ function textBytes(value: string) {
   return new TextEncoder().encode(value)
 }
 
-async function realBytes(extension: string, seed: number, name: string) {
+async function realBytes(extension: string, seed: number, name: string, request: FileRequest) {
   const ext = extension.toUpperCase()
+  const media = await realMedia(ext, request)
+  if (media) return media
   if (ext === 'TXT') return textBytes('MassForge\nArquivo de texto para teste de upload.\n')
   if (ext === 'EML') {
     return textBytes('From: teste@exemplo.com.br\r\nTo: qa@exemplo.com.br\r\nSubject: MassForge\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nCorpo ficticio para teste.\r\n')
   }
-  if (ext === 'PNG') return TINY_PNG
-  if (ext === 'GIF') return TINY_GIF
-  if (ext === 'JPG' || ext === 'JPEG') return TINY_JPG
   if (ext === 'ZIP' || ext === 'ODT' || ext === 'ODS' || ext === 'ODP') return odfOrZip(ext, name)
   if (ext === 'PDF' || ext === 'DOCX' || ext === 'XLSX' || ext === 'PPTX') {
     const format = ext === 'PDF' ? 'PDF' : ext === 'DOCX' ? 'Word' : ext === 'XLSX' ? 'Excel' : 'PowerPoint'
+    const components = format === 'Excel'
+      ? [{ id: 'aba', type: 'aba', props: { nome: 'Dados', linhas: 8, colunas: 3 } }]
+      : [
+          { id: 'titulo', type: 'titulo', props: { texto: 'Arquivo de teste', nivel: 'H1' } },
+          { id: 'paragrafo', type: 'paragrafo', props: { qtd: 1, tam: 'Curto', negrito: false, italico: false } },
+        ]
     const built = await buildDocument({
       format,
-      components: [
-        { id: 'titulo', type: 'titulo', props: { texto: 'Arquivo de teste', nivel: 'H1' } },
-        { id: 'paragrafo', type: 'paragrafo', props: { qtd: 1, tam: 'Curto', negrito: false, italico: false } },
-      ],
+      components,
       meta: { nome: name, titulo: 'Arquivo de teste', autor: 'MassForge', pagina: 'A4', orient: 'Retrato', conteudo: 'Normal' },
       seed,
     })
@@ -142,6 +169,7 @@ function magic(extension: string) {
   if (ext === 'PNG') return Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   if (ext === 'JPG' || ext === 'JPEG') return Uint8Array.from([0xff, 0xd8, 0xff])
   if (ext === 'GIF') return textBytes('GIF89a')
+  if (ext === 'WAV' || ext === 'AVI') return textBytes('RIFF')
   if (['ZIP', 'DOCX', 'XLSX', 'PPTX', 'ODT', 'ODS', 'ODP'].includes(ext)) return Uint8Array.from([0x50, 0x4b, 0x03, 0x04])
   return textBytes('')
 }
@@ -167,6 +195,8 @@ export function validateFileRequest(request: FileRequest) {
       return error instanceof Error ? error.message : 'Tamanho inválido.'
     }
   }
+  const mediaError = mediaRequestError(request, { file: FILE_BYTE_LIMIT, total: FILE_TOTAL_LIMIT })
+  if (mediaError) return mediaError
   return null
 }
 
@@ -191,13 +221,13 @@ export async function generateFiles(request: FileRequest, seed: number): Promise
         const body = randomBytes(size - head.length, seed + 1000 + artifacts.length)
         bytes = concat([head, body])
       } else if (request.conteudo === 'Extensão divergente') {
-        const produced = await realBytes(request.real, seed, request.nome || 'arquivo')
+        const produced = await realBytes(request.real, seed, request.nome || 'arquivo', request)
         if (!produced) throw new Error(`Não há gerador real para o conteúdo ${request.real}.`)
         bytes = produced
       } else if ((INERT as Set<string>).has(extension)) {
         bytes = inertText(extension)
       } else if ((REAL as Set<string>).has(extension) || request.conteudo === 'Truncado' || request.conteudo === 'Estrutura real') {
-        const produced = await realBytes(extension, seed + index, request.nome || 'arquivo')
+        const produced = await realBytes(extension, seed + index, request.nome || 'arquivo', request)
         if (!produced) {
           bytes = concat([magic(extension), textBytes(`\nSimulado: não há gerador estrutural para .${extension.toLowerCase()}.\n`)])
         } else if (request.conteudo === 'Truncado') {
@@ -220,7 +250,7 @@ export async function generateFiles(request: FileRequest, seed: number): Promise
         checksum: await sha256(bytes),
         tag: info.tag,
         tone: info.tone,
-        description: info.desc,
+        description: request.vazio ? info.desc : `${info.desc} · ${bytes.length} bytes`,
       })
     }
   }

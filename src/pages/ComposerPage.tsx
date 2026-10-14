@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CS, DEFAULT_COMPS, DOC_FIELDS } from '../domain/mfEngine.ts'
 import { buildDocument, type DocComponent, type DocFormat, type DocMeta } from '../domain/documents.ts'
-import { downloadBytes } from '../ui/browser.ts'
+import { downloadBytes, downloadNotice, type Notice } from '../ui/browser.ts'
+import { ClearButton } from '../ui/ClearButton.tsx'
 import { FieldList, type EngineField } from '../ui/Fields.tsx'
 
 const FORMATS: DocFormat[] = ['Word', 'Excel', 'PowerPoint', 'PDF']
@@ -40,7 +41,7 @@ export function ComposerPage({
   onToast,
 }: {
   format?: string
-  onToast: (message: string, bad?: boolean) => void
+  onToast: (message: string | Notice, bad?: boolean) => void
 }) {
   const initial = FORMATS.includes(format as DocFormat) ? format as DocFormat : 'Word'
   const [current, setCurrent] = useState<DocFormat>(initial)
@@ -72,6 +73,22 @@ export function ComposerPage({
     () => (DOC_FIELDS as EngineField[]).map((field) => field),
     [],
   )
+
+  function reset() {
+    setComponents(fresh(current))
+    setMeta({
+      nome: 'documento_teste',
+      titulo: 'Relatório de testes',
+      autor: 'MassForge',
+      pagina: 'A4',
+      orient: 'Retrato',
+      conteudo: 'Normal',
+      fmt: current,
+    })
+    setNotes([])
+    setPicking(false)
+    onToast('Configurações e prévia limpas.')
+  }
 
   function changeFormat(next: DocFormat) {
     setCurrent(next)
@@ -117,7 +134,7 @@ export function ComposerPage({
       })
       setNotes(built.notes)
       downloadBytes(built.filename, built.bytes, built.mime)
-      onToast(`Download de ${built.filename} iniciado. Isso não confirma que o arquivo foi salvo.`)
+      onToast(downloadNotice(built.filename))
     } catch (caught) {
       onToast(caught instanceof Error ? caught.message : 'Falha ao montar o documento.', true)
     } finally {
@@ -127,12 +144,13 @@ export function ComposerPage({
 
   return (
     <div className="work">
+      <ClearButton disabled={busy} onClick={reset} />
       <section className="step">
         <header className="step-title">
           <b>1</b>
           <div>
             <h2>Escolha o formato</h2>
-            <p>Word, Excel, PowerPoint ou PDF.</p>
+            <p>Word e PDF saem com o timbre e a marca d’água. Excel e PowerPoint seguem o formato de cada um.</p>
           </div>
         </header>
         <div className="fields">

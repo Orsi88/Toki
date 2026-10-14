@@ -37,7 +37,7 @@ export const STEPS: Record<string, [string, string, string[], string[]?][]> = {
     ['Defina o formato', 'Formato de exibição da data.', ['formato']],
   ],
   numero: [
-    ['Escolha o tipo de valor', 'Inteiro, decimal, porcentagem, monetário ou sequência. Todas as variações gera a massa inteira.', ['tipo', 'sinal']],
+    ['Escolha o tipo de valor', 'Inteiro, decimal, porcentagem, monetário, cor, medida ou sequência.', ['tipo', 'sinal', 'repr', 'origemCor', 'corBase', 'alfa', 'regraCor', 'unidade', 'converter']],
     ['Defina o intervalo', 'Usado na geração e na explicação de cada valor.', ['min', 'max', 'ordem', 'passo']],
     ['Selecione a regra que deseja testar', 'Valores dentro do intervalo, fora dele ou repetidos. Todas as variações junta cada regra.', ['regra', 'unicos']],
     ['Formatação', 'Casas decimais e separadores.', ['casas', 'sep', 'milhar']],
@@ -71,9 +71,14 @@ export const STEPS: Record<string, [string, string, string[], string[]?][]> = {
     ['Defina o tamanho', 'Escolha uma versão pronta da história ou um tamanho exato.', ['medida', 'versao', 'tamanho']],
     ['Caracterize o texto', 'Letras, acentos, emojis, símbolos e quebras de linha.', ['caixa', 'maiusc', 'minusc', 'numeros', 'acentos', 'emojis', 'especiais', 'capitulos', 'quebras', 'espacos', 'unicode', 'custom'], ['limite']],
   ],
+  mapa: [
+    ['Escolha o que gerar', 'Um ponto ou uma área, no formato que o sistema lê.', ['tipo', 'formato', 'regiao']],
+    ['Defina a precisão e, se quiser, o retângulo', 'A área informada só aparece quando a região é Informada.', ['latMin', 'latMax', 'lngMin', 'lngMax', 'casas']],
+    ['Selecione a regra que deseja testar', 'Válida, ou um caso negativo explícito. Todas as variações junta cada regra.', ['regra']],
+  ],
   estrutura: [
-    ['Escolha o tipo de dado estruturado', 'JSON, XML, CSV, YAML ou SQL.', ['formato']],
-    ['Defina as propriedades', 'Nome e tipo de cada propriedade do registro.', ['campos']],
+    ['Escolha o tipo de dado estruturado', 'JSON, XML, CSV, YAML, SQL, código, lista, hierarquia ou série.', ['formato', 'simbologia', 'conteudoModo', 'conteudo', 'ecc', 'margem', 'lado', 'qtdCodigos', 'regraCodigo', 'regraQr']],
+    ['Defina as propriedades', 'Campos do registro, itens da lista, árvore ou pontos da série.', ['campos', 'itens', 'rotulo', 'regraLista', 'niveis', 'filhos', 'saida', 'regraHier', 'pontos', 'seriesQtd', 'padrao', 'catTipo', 'intervaloMin', 'intervaloMax', 'casasSerie', 'saidaSerie']],
     ['Escolha a regra a testar', 'Conteúdo válido ou quebrado de propósito.', ['regra'], ['indent', 'raiz']],
   ],
 }

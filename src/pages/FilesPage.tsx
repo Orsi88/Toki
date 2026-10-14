@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { FAM, FILE_DEF, FILE_FIELDS, fileName } from '../domain/mfEngine.ts'
-import { generateFiles, validateFileRequest, zipArtifacts, fmtBytes, folderPath, type FileArtifact, type FileRequest, type FolderMode } from '../domain/files.ts'
-import { copyText, downloadBytes } from '../ui/browser.ts'
-import { CopyButton } from '../ui/CopyButton.tsx'
+import { FAM, FILE_DEF, FILE_FIELDS, fmtBytes } from '../domain/mfEngine.ts'
+import { generateFiles, validateFileRequest, zipArtifacts, folderPreview, sanitizeFolder, type FileRequest, type FolderMode } from '../domain/files.ts'
+import { downloadBytes, downloadNotice, type Notice } from '../ui/browser.ts'
 import { FieldList, type EngineField } from '../ui/Fields.tsx'
+import { ClearButton } from '../ui/ClearButton.tsx'
 import { SearchField } from '../ui/SearchField.tsx'
 
 export function FilesPage({
@@ -11,15 +11,15 @@ export function FilesPage({
   onToast,
 }: {
   extension?: string
-  onToast: (message: string, bad?: boolean) => void
+  onToast: (message: string | Notice, bad?: boolean) => void
 }) {
   const [selected, setSelected] = useState<string[]>(extension ? [extension.toUpperCase()] : ['PDF'])
   const [filter, setFilter] = useState('')
   const [config, setConfig] = useState<Record<string, unknown>>({ ...FILE_DEF, sel: extension ? [extension.toUpperCase()] : ['PDF'] })
   const [folderMode, setFolderMode] = useState<FolderMode>('familia')
   const [folderName, setFolderName] = useState('arquivos_teste')
-  const [files, setFiles] = useState<FileArtifact[] | null>(null)
   const [busy, setBusy] = useState(false)
+  const [summary, setSummary] = useState('')
   const request = useMemo<FileRequest>(() => ({
     sel: selected,
     nome: String(config.nome || 'arquivo_teste'),
@@ -32,6 +32,22 @@ export function FilesPage({
     qtd: Number(config.qtd ?? 1),
     folderMode,
     folderName,
+    audioDur: Number(config.audioDur ?? 2),
+    audioKind: String(config.audioKind || 'Tom de teste'),
+    audioChannels: Number(config.audioChannels ?? 1),
+    audioRate: Number(config.audioRate ?? 44100),
+    videoDur: Number(config.videoDur ?? 2),
+    videoRes: String(config.videoRes || '320×180'),
+    videoOrient: String(config.videoOrient || 'Horizontal'),
+    videoFps: Number(config.videoFps ?? 8),
+    videoAudio: Boolean(config.videoAudio),
+    imgFundo: String(config.imgFundo || 'Opaco'),
+    imgGif: String(config.imgGif || 'Estático'),
+    imgQuadros: Number(config.imgQuadros ?? 4),
+    imgFrameMs: Number(config.imgFrameMs ?? 200),
+    imgProp: String(config.imgProp || 'Horizontal'),
+    imgQual: Number(config.imgQual ?? 80),
+    imgExif: String(config.imgExif || 'Sem EXIF'),
   }), [config, folderMode, folderName, selected])
   const error = validateFileRequest(request)
   const folded = filter.trim().toLocaleLowerCase('pt-BR').replace(/^\./, '')
@@ -40,24 +56,47 @@ export function FilesPage({
     setBusy(true)
     try {
       const produced = await generateFiles(request, Math.floor(Math.random() * 1_000_000_000))
-      setFiles(produced)
-      onToast(`${produced.length} arquivo(s) prontos. O download ainda não foi iniciado.`)
+      const zip = await zipArtifacts(produced)
+      downloadBytes(`${sanitizeFolder(folderName)}.zip`, zip, 'application/zip')
+      const total = produced.reduce((sum, file) => sum + file.sizeBytes, 0)
+      const byExtension = new Map<string, number>()
+      for (const file of produced) byExtension.set(file.extension, (byExtension.get(file.extension) ?? 0) + file.sizeBytes)
+      const detail = [...byExtension].map(([ext, bytes]) => `${ext} ${bytes} B`).join(' · ')
+      setSummary(`${produced.length} arquivos · ${fmtBytes(total)}. ${detail}.`)
+      onToast(downloadNotice())
     } catch (caught) {
-      setFiles(null)
       onToast(caught instanceof Error ? caught.message : 'Falha ao gerar arquivos.', true)
     } finally {
       setBusy(false)
     }
   }
 
-  const preview = selected.slice(0, 6).map((ext) => {
-    const folder = folderPath(folderMode, folderName, ext)
-    const filename = String(fileName({ ...FILE_DEF, ...request }, ext, request.qtd > 1 || selected.length > 1 ? '_1' : ''))
-    return folder ? `${folder}/${filename}` : filename
-  })
+  const preview = folderPreview(selected, request)
+  const fieldConfig = {
+    ...config,
+    _audio: selected.includes('WAV'),
+    _mp3: selected.includes('MP3'),
+    _video: selected.includes('AVI'),
+    _mp4: selected.includes('MP4'),
+    _png: selected.includes('PNG'),
+    _gif: selected.includes('GIF'),
+    _jpg: selected.includes('JPG') || selected.includes('JPEG'),
+  }
+
+  function reset() {
+    const base = extension ? [extension.toUpperCase()] : ['PDF']
+    setSelected(base)
+    setFilter('')
+    setConfig({ ...FILE_DEF, sel: base })
+    setFolderMode('familia')
+    setFolderName('arquivos_teste')
+    setSummary('')
+    onToast('Configurações e prévia limpas.')
+  }
 
   return (
     <div className="work">
+      <ClearButton disabled={busy} onClick={reset} />
       <section className="step">
         <header className="step-title">
           <b>1</b>
@@ -100,7 +139,7 @@ export function FilesPage({
         </header>
         <FieldList
           fields={FILE_FIELDS as EngineField[]}
-          config={config}
+          config={fieldConfig}
           onChange={(name, value) => setConfig((current) => ({ ...current, [name]: value }))}
         />
       </section>
@@ -126,40 +165,12 @@ export function FilesPage({
             </label>
           ) : null}
         </div>
-        <pre className="tree">{preview.length ? preview.join('\n') : 'Nenhuma extensão selecionada.'}</pre>
+        <pre className="tree">{preview}</pre>
         {error ? <p className="banner bad">{error}</p> : null}
         <button id="mf-generate" className="primary" type="button" disabled={Boolean(error) || busy} onClick={generate}>
           {busy ? 'Gerando...' : 'Gerar arquivos'}
         </button>
-      </section>
-      <section className="panel" id="resultado">
-        <h2>Arquivos</h2>
-        {!files ? <p className="muted">Nenhum lote ainda. Escolha as extensões e gere.</p> : null}
-        {files && (
-          <>
-            <p className="muted">{files.length} arquivo(s), {fmtBytes(files.reduce((sum, file) => sum + file.sizeBytes, 0))} no total.</p>
-            <div className="list">
-              {files.slice(0, 80).map((file) => (
-                <article key={file.filename} className="card">
-                  <span className="cell"><strong>{file.path}</strong><CopyButton label="Copiar caminho" onCopy={async () => { const ok = await copyText(file.path); onToast(ok ? 'Caminho copiado.' : 'Não foi possível copiar.', !ok) }} /></span>
-                  <p><span className={`tone ${file.tone}`}>{file.tag}</span> {fmtBytes(file.sizeBytes)}</p>
-                  <p className="muted">{file.description}</p>
-                  <p className="mono">{file.checksum.slice(0, 16)}</p>
-                  <button type="button" className="ghost" onClick={() => {
-                    downloadBytes(file.filename, file.bytes, 'application/octet-stream')
-                    onToast('Download iniciado. Isso não confirma que o arquivo foi salvo.')
-                  }}>Baixar</button>
-                </article>
-              ))}
-            </div>
-            {files.length > 80 ? <p className="muted">A lista mostra 80 de {files.length}. O ZIP contém todos.</p> : null}
-            <button type="button" className="primary" onClick={async () => {
-              const zip = await zipArtifacts(files)
-              downloadBytes('arquivos_teste.zip', zip, 'application/zip')
-              onToast('Download do ZIP iniciado.')
-            }}>Baixar ZIP</button>
-          </>
-        )}
+        {summary ? <p className="file-summary">{summary}</p> : null}
       </section>
     </div>
   )

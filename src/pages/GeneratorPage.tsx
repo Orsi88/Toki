@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { recordsToCsv, recordsToJson, splitDiagnostics, type GeneratedItem } from '../domain/export.ts'
 import { ENG, genStruct, genText, key, rng, setReferenceDate } from '../domain/mfEngine.ts'
-import { copyText, downloadText } from '../ui/browser.ts'
+import { copyText, downloadNotice, downloadText, type Notice } from '../ui/browser.ts'
 import { CopyButton } from '../ui/CopyButton.tsx'
 import { STEPS } from '../domain/steps.ts'
-import { FieldList, Tip, type EngineField } from '../ui/Fields.tsx'
-import { ValueResults } from '../ui/Results.tsx'
+import { FieldList, Tip, fieldVisible, type EngineField } from '../ui/Fields.tsx'
+import { isColor, isMeasure, parseColor } from '../domain/values.ts'
+import { CoordinateMap, ValueResults } from '../ui/Results.tsx'
+import { ClearButton } from '../ui/ClearButton.tsx'
 import { VaryButton } from '../ui/VaryButton.tsx'
 
 type Config = Record<string, unknown>
@@ -54,10 +56,69 @@ function validate(id: string, config: Config) {
     const size = Number(config.tamanho)
     if (!Number.isInteger(size) || size < 0 || size > 1_000_000) return 'O tamanho precisa ser um inteiro de 0 a 1.000.000.'
   }
+  if (id === 'numero' && isColor(String(config.tipo))) {
+    if (config.origemCor === 'Informada' && config.regraCor === 'Válida' && !parseColor(String(config.corBase || ''))) {
+      return 'A cor informada precisa ser #RRGGBB, rgb() ou rgba() com canais de 0 a 255.'
+    }
+    if (config.repr === 'RGBA') {
+      const alpha = Number(config.alfa)
+      if (!Number.isFinite(alpha) || alpha < 0 || alpha > 100) return 'O alfa precisa estar entre 0 e 100.'
+    }
+  }
+  if (id === 'numero' && isMeasure(String(config.tipo)) && Number(config.min) > Number(config.max)) {
+    return 'O mínimo está acima do máximo.'
+  }
+  if (id === 'mapa' && config.regiao === 'Informada') {
+    const bounds = [config.latMin, config.latMax, config.lngMin, config.lngMax].map(Number)
+    if (bounds.some((value) => !Number.isFinite(value))) return 'A área informada precisa de latitude e longitude numéricas.'
+    if (bounds[0] > bounds[1] || bounds[2] > bounds[3]) return 'Na área informada, o mínimo está acima do máximo.'
+    if (bounds[0] < -90 || bounds[1] > 90 || bounds[2] < -180 || bounds[3] > 180) return 'A área informada precisa caber em latitude -90 a 90 e longitude -180 a 180.'
+  }
+  if (id === 'mapa' && config.tipo !== 'Área' && config.regra === 'Fora da região' && config.regiao === 'Mundo') {
+    return 'Fora da região pede Brasil ou uma área informada.'
+  }
   if (id === 'estrutura') {
-    const count = Number(config.registros)
-    if (!Number.isInteger(count) || count < 1 || count > 100) return 'Registros precisa ser um inteiro de 1 a 100.'
-    if (!Array.isArray(config.campos) || config.campos.length === 0) return 'Selecione ao menos um campo.'
+    const format = String(config.formato)
+    if (format === 'Código de barras' || format === 'QR Code') {
+      const count = Number(config.qtdCodigos)
+      if (!Number.isInteger(count) || count < 1 || count > 20) return 'A quantidade de códigos precisa ser um inteiro de 1 a 20.'
+      if (format === 'Código de barras' && config.conteudoModo === 'Informado' && !String(config.conteudo || '').trim() && config.regraCodigo !== 'Conteúdo incompatível') {
+        return 'Informe o conteúdo do código.'
+      }
+      if (format === 'QR Code' && config.conteudoModo === 'Informado' && !String(config.conteudo || '').trim() && config.regraQr === 'Válido') {
+        return 'Informe o conteúdo do QR.'
+      }
+      if (format === 'QR Code') {
+        const side = Number(config.lado)
+        const margin = Number(config.margem)
+        if (!Number.isInteger(side) || side < 64 || side > 512) return 'O lado do QR precisa ser um inteiro de 64 a 512.'
+        if (!Number.isInteger(margin) || margin < 0 || margin > 10) return 'A margem do QR precisa ser um inteiro de 0 a 10.'
+      }
+    } else if (format === 'Lista') {
+      const count = Number(config.itens)
+      if (!Number.isInteger(count) || count < 1 || count > 100) return 'A lista precisa de 1 a 100 itens.'
+    } else if (format === 'Hierarquia') {
+      const levels = Number(config.niveis)
+      const children = Number(config.filhos)
+      if (!Number.isInteger(levels) || levels < 2 || levels > 4) return 'Os níveis precisam ser um inteiro de 2 a 4.'
+      if (!Number.isInteger(children) || children < 1 || children > 4) return 'Os filhos por nível precisam ser um inteiro de 1 a 4.'
+      if (config.saida === 'Aninhada' && config.regraHier === 'Referência circular') {
+        return 'Referência circular não cabe numa saída aninhada. Escolha a saída plana.'
+      }
+    } else if (format === 'Série') {
+      const points = Number(config.pontos)
+      const series = Number(config.seriesQtd)
+      if (!Number.isInteger(points) || points < 1 || points > 100) return 'A série precisa de 1 a 100 pontos.'
+      if (!Number.isInteger(series) || series < 1 || series > 3) return 'Use de 1 a 3 séries.'
+      if (!Number.isFinite(Number(config.intervaloMin)) || !Number.isFinite(Number(config.intervaloMax))) return 'O intervalo da série precisa ser numérico.'
+      if (Number(config.intervaloMin) > Number(config.intervaloMax)) return 'O mínimo da série está acima do máximo.'
+      if (config.padrao === 'Datas fora de ordem' && config.catTipo !== 'Datas') return 'Datas fora de ordem pedem a sequência de datas.'
+      if (config.padrao === 'Categorias repetidas' && config.catTipo === 'Datas') return 'Categorias repetidas pedem categorias, não datas.'
+    } else {
+      const count = Number(config.registros)
+      if (!Number.isInteger(count) || count < 1 || count > 100) return 'Registros precisa ser um inteiro de 1 a 100.'
+      if (!Array.isArray(config.campos) || config.campos.length === 0) return 'Selecione ao menos um campo.'
+    }
   }
   return null
 }
@@ -83,7 +144,7 @@ export function GeneratorPage({
 }: {
   id: string
   query: URLSearchParams
-  onToast: (message: string, bad?: boolean) => void
+  onToast: (message: string | Notice, bad?: boolean) => void
 }) {
   const engine = (ENG as unknown as Record<string, {
     kind: string
@@ -101,7 +162,7 @@ export function GeneratorPage({
   const [preview, setPreview] = useState<GeneratedItem[]>([])
   const [diagnostics, setDiagnostics] = useState<GeneratedItem[]>([])
   const [text, setText] = useState('')
-  const [code, setCode] = useState<{ code: string; tag: string; tone: string; info: string } | null>(null)
+  const [code, setCode] = useState<{ code: string; tag: string; tone: string; info: string; svg?: string } | null>(null)
   const [lote, setLote] = useState<GeneratedItem[] | null>(null)
   const [loteText, setLoteText] = useState<string | null>(null)
   const [loteCode, setLoteCode] = useState<typeof code>(null)
@@ -152,6 +213,24 @@ export function GeneratorPage({
       return { ...current, origem: value, campos: [...next] }
     })
     if (lote || loteText || loteCode) setStale(true)
+  }
+
+  function reset() {
+    setConfig(structuredClone(engine.def))
+    setReference(todayInput())
+    setFixedSeed(false)
+    setSeedText('4821')
+    setPreview([])
+    setDiagnostics([])
+    setText('')
+    setCode(null)
+    setLote(null)
+    setLoteText(null)
+    setLoteCode(null)
+    setLoteSeed(null)
+    setStale(false)
+    setPreviewSeed(Math.floor(Math.random() * 1_000_000_000))
+    onToast('Configurações e prévia limpas.')
   }
 
   function vary() {
@@ -211,10 +290,12 @@ export function GeneratorPage({
   const activeText = loteText ?? text
   const activeCode = loteCode ?? code
   const previewLimited = engine.kind !== 'text' && engine.kind !== 'code' && typeof config.qtd === 'number' && config.qtd > 8 && !lote
+  const visibleSteps = grouped.steps.filter((step) => step.fields.some((field) => fieldVisible(field, config)) || step.advanced.some((field) => fieldVisible(field, config)))
 
   return (
     <div className="work">
-      {grouped.steps.map((step, index) => (
+      <ClearButton onClick={reset} />
+      {visibleSteps.map((step, index) => (
         <section className="step" key={step.title}>
           <header className="step-title">
             <b>{index + 1}</b>
@@ -237,7 +318,7 @@ export function GeneratorPage({
       ))}
       <section className="step">
         <header className="step-title">
-          <b>{grouped.steps.length + 1}</b>
+          <b>{visibleSteps.length + 1}</b>
           <div>
             <h2>Defina a geração do lote</h2>
             <p>Quantidade, data de referência e seed usada na exportação.</p>
@@ -287,13 +368,14 @@ export function GeneratorPage({
               <p className="char-count">Qtd caracteres: {Array.from(activeText).length}</p>
             </div>
             <div className="row-actions">
-              <button type="button" className="download" onClick={() => { downloadText('texto.txt', loteText ?? activeText); onToast('Download iniciado. Isso não confirma que o arquivo foi salvo.') }}>Baixar TXT</button>
+              <button type="button" className="download" onClick={() => { downloadText('texto.txt', loteText ?? activeText); onToast(downloadNotice()) }}>Baixar TXT</button>
             </div>
           </>
         )}
         {engine.kind === 'code' && activeCode && (
           <>
             {activeCode.info ? <p>{activeCode.info}</p> : null}
+            {activeCode.svg ? <div className="symbol-preview" dangerouslySetInnerHTML={{ __html: activeCode.svg }} /> : null}
             <div className="view-block">
               <div className="copy-block">
                 <pre>{activeCode.code}</pre>
@@ -303,10 +385,23 @@ export function GeneratorPage({
             </div>
             <div className="row-actions">
               <button type="button" className="download" disabled={!loteCode} onClick={() => {
-                const extension = String(config.formato || 'txt').toLowerCase()
-                downloadText(`estruturado.${extension === 'sql' ? 'sql' : extension}`, loteCode?.code || '', 'text/plain;charset=utf-8')
-                onToast('Download iniciado. Isso não confirma que o arquivo foi salvo.')
+                const format = String(config.formato || 'txt')
+                const payload = loteCode?.code || ''
+                if (format === 'Série' && config.saidaSerie === 'CSV') downloadText('serie.csv', payload, 'text/csv;charset=utf-8')
+                else if (format === 'Lista') downloadText('lista.json', payload, 'application/json')
+                else if (format === 'Hierarquia') downloadText('hierarquia.json', payload, 'application/json')
+                else if (format === 'Série') downloadText('serie.json', payload, 'application/json')
+                else if (format === 'Código de barras' || format === 'QR Code') downloadText('conteudo.txt', payload, 'text/plain;charset=utf-8')
+                else {
+                  const extension = format.toLowerCase()
+                  downloadText(`estruturado.${extension === 'sql' ? 'sql' : extension}`, payload, 'text/plain;charset=utf-8')
+                }
+                onToast(downloadNotice())
               }}>Baixar lote</button>
+              {loteCode?.svg ? <button type="button" className="download" onClick={() => {
+                downloadText('codigo.svg', loteCode.svg || '', 'image/svg+xml')
+                onToast(downloadNotice())
+              }}>Baixar imagem</button> : null}
             </div>
           </>
         )}
@@ -319,17 +414,25 @@ export function GeneratorPage({
               <button type="button" disabled={!lote?.length} onClick={() => {
                 if (!lote) return
                 downloadText('lote.csv', recordsToCsv(lote), 'text/csv;charset=utf-8')
-                onToast('Download iniciado. Isso não confirma que o arquivo foi salvo.')
+                onToast(downloadNotice())
               }}>Baixar CSV</button>
               <button type="button" disabled={!lote?.length} onClick={() => {
                 if (!lote) return
                 downloadText('lote.json', recordsToJson(lote), 'application/json')
-                onToast('Download iniciado. Isso não confirma que o arquivo foi salvo.')
+                onToast(downloadNotice())
               }}>Baixar JSON</button>
             </div>
           </>
         )}
       </section>
+      {id === 'mapa' && shown.length ? (
+        <section className="panel" aria-label="Mapa">
+          <header className="preview-head">
+            <h2>Mapa</h2>
+          </header>
+          <CoordinateMap key={shown.slice(0, 8).map((item) => item.fields.map((field) => field.v).join('|')).join('\n')} items={shown.slice(0, 100)} />
+        </section>
+      ) : null}
     </div>
   )
 }

@@ -1172,3 +1172,12 @@ textarea.code::placeholder { color: var(--muted); opacity: .7; }
 .type-more:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
 .type-caret { position: absolute; right: 14px; top: 50%; width: 12px; height: 8px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 .type-option:not(:has(small)) { align-items: center; }
+.file-chips li { padding: 4px 6px 4px 12px; }
+.chip-remove {
+  width: 24px; height: 24px; padding: 0; flex: none;
+  display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: transparent; color: var(--muted);
+  transition: background .15s ease, color .15s ease;
+}
+.chip-remove svg { width: 14px; height: 14px; }
+.chip-remove:hover { background: var(--error-soft); color: var(--error); }

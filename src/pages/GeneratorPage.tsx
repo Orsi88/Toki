@@ -200,6 +200,8 @@ export function GeneratorPage({
 
   function update(name: string, value: unknown) {
     setConfig((current) => {
+      // Na medida "Versão" o tamanho não vale; digitar um tamanho passa a medir por caracteres, como a dica do campo promete.
+      if (id === 'texto' && name === 'tamanho' && current.medida === 'Versão') return { ...current, tamanho: value, medida: 'Caracteres' }
       if (id !== 'identidade' || name !== 'origem' || !Array.isArray(current.campos)) return { ...current, [name]: value }
       const next = new Set<string>()
       for (const field of current.campos as string[]) {

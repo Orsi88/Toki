@@ -191,7 +191,9 @@ export function ValidatePage({ id, query, onToast }: { id: string; query: URLSea
                   <li key={`${file.name}-${index}`}>
                     <span>{file.name}</span>
                     <small>{size(file.bytes.length)}</small>
-                    <button type="button" className="ghost" aria-label={`Tirar ${file.name}`} onClick={() => { setFiles(files.filter((_, at) => at !== index)); stale() }}>×</button>
+                    <button type="button" className="chip-remove" aria-label={`Tirar ${file.name}`} title="Tirar da lista" onClick={() => { setFiles(files.filter((_, at) => at !== index)); stale() }}>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+                    </button>
                   </li>
                 ))}
               </ul>

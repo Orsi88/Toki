@@ -9,7 +9,13 @@ import { bad, ok, verdict, warn, type Check, type Verdict } from './verdict.ts'
 
 export type InFile = { name: string; bytes: Uint8Array }
 
-const LABELS = { ok: 'Arquivo íntegro', bad: 'Problema encontrado', warn: 'Íntegro, com alertas' }
+// O investigador não aprova nem reprova: quem decide é quem sabe para que o arquivo serve. Ele só diz o que achou.
+const LABELS = { ok: 'Nada a observar', bad: 'Pede atenção', warn: 'Com observações' }
+
+function report(name: string, checks: Check[]): Verdict {
+  const found = [...new Set(checks.filter((check) => check.tone !== 'ok').map((check) => check.label.toLocaleLowerCase('pt-BR')))]
+  return { ...verdict(name, checks, LABELS), summary: found.length ? `Encontrado: ${found.join(', ')}.` : 'Nada fora do comum.' }
+}
 
 const DANGEROUS = new Set(['EXE', 'DLL', 'SCR', 'COM', 'PIF', 'CPL', 'MSI', 'MSP', 'BAT', 'CMD', 'VBS', 'VBE', 'JS', 'JSE', 'WSF', 'WSH', 'PS1', 'HTA', 'LNK', 'JAR', 'APPLICATION', 'GADGET', 'REG', 'SYS'])
 
@@ -18,7 +24,7 @@ const EXPECTED: Record<string, string[]> = {
   PDF: ['pdf'], PNG: ['png'], JPG: ['jpeg'], JPEG: ['jpeg'], GIF: ['gif'], BMP: ['bmp'], WEBP: ['webp'],
   WAV: ['wav'], AVI: ['avi'], MP3: ['mp3'], MP4: ['mp4'], M4A: ['mp4'], MOV: ['mp4'],
   ZIP: ['zip', 'docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp', 'jar', 'apk'], RAR: ['rar'], '7Z': ['7z'], GZ: ['gzip'], TGZ: ['gzip'],
-  DOCX: ['docx'], DOCM: ['docx'], XLSX: ['xlsx'], XLSM: ['xlsx'], PPTX: ['pptx'], PPTM: ['pptx'],
+  DOCX: ['docx', 'encrypted'], DOCM: ['docx', 'encrypted'], XLSX: ['xlsx', 'encrypted'], XLSM: ['xlsx', 'encrypted'], PPTX: ['pptx', 'encrypted'], PPTM: ['pptx', 'encrypted'],
   ODT: ['odt'], ODS: ['ods'], ODP: ['odp'], JAR: ['jar'], APK: ['apk'], GADGET: ['zip'],
   DOC: ['ole'], XLS: ['ole'], PPT: ['ole'], MSG: ['ole'], MSI: ['ole'], MSP: ['ole'],
   EXE: ['exe'], DLL: ['exe'], SCR: ['exe'], COM: ['exe'], PIF: ['exe'], CPL: ['exe'], SYS: ['exe'],
@@ -31,7 +37,7 @@ const KIND_LABEL: Record<string, string> = {
   pdf: 'PDF', png: 'PNG', jpeg: 'JPEG', gif: 'GIF', bmp: 'BMP', webp: 'WebP', wav: 'WAV', avi: 'AVI', mp3: 'MP3', mp4: 'MP4/MOV',
   zip: 'ZIP', docx: 'Word (DOCX)', xlsx: 'Excel (XLSX)', pptx: 'PowerPoint (PPTX)', odt: 'OpenDocument texto', ods: 'OpenDocument planilha',
   odp: 'OpenDocument apresentação', jar: 'Java (JAR)', apk: 'Android (APK)', rar: 'RAR', '7z': '7-Zip', gzip: 'GZIP',
-  ole: 'Office antigo / OLE', exe: 'Executável Windows (PE)', elf: 'Executável Linux (ELF)', rtf: 'RTF', text: 'Texto', binary: 'Binário desconhecido', empty: 'Vazio',
+  ole: 'Office antigo / OLE', encrypted: 'Office com senha (criptografado)', exe: 'Executável Windows (PE)', elf: 'Executável Linux (ELF)', rtf: 'RTF', text: 'Texto', binary: 'Binário desconhecido', empty: 'Vazio',
 }
 
 const ascii = (bytes: Uint8Array, start: number, end: number) => String.fromCharCode(...bytes.subarray(start, Math.min(end, bytes.length)))
@@ -304,20 +310,36 @@ function utf16Names(bytes: Uint8Array) {
   return names
 }
 
-function inspectOle(bytes: Uint8Array): Check[] {
+// Office 97-2003 marca a senha de abertura dentro do próprio stream, não no contêiner. Sem ler o diretório OLE,
+// procura o começo do stream nos limites de setor: o FIB do Word (A5EC) e o BOF de globais do Excel (BIFF8).
+function legacyPassword(bytes: Uint8Array, sector: number, word: boolean) {
+  for (let at = 512; at + 32 <= bytes.length; at += word ? sector : 64) {
+    if (word && u16le(bytes, at) === 0xa5ec) return (u16le(bytes, at + 0x0a) & 0x0100) !== 0
+    if (!word && starts(bytes, [0x09, 0x08, 0x10, 0x00, 0x00, 0x06, 0x05, 0x00], at)) return u16le(bytes, at + 20) === 0x002f
+  }
+  return null
+}
+
+function inspectOle(bytes: Uint8Array): { kind: string; checks: Check[] } {
   const shift = u16le(bytes, 0x1e)
   const sector = 2 ** shift
-  if (shift !== 9 && shift !== 12) return [bad('Estrutura', 'Cabeçalho OLE com tamanho de setor inválido.')]
+  if (shift !== 9 && shift !== 12) return { kind: 'ole', checks: [bad('Estrutura', 'Cabeçalho OLE com tamanho de setor inválido.')] }
   const names = utf16Names(bytes)
   const has = (name: string) => names.has(name) || [...names].some((item) => item.endsWith(name))
-  const kind = has('WordDocument') ? 'Word 97-2003 (.doc)' : has('Workbook') || has('Book') ? 'Excel 97-2003 (.xls)' : has('PowerPoint Document') ? 'PowerPoint 97-2003 (.ppt)' : [...names].some((item) => item.startsWith('__substg1.0_')) ? 'mensagem do Outlook (.msg)' : has('EncryptedPackage') ? 'Office protegido por senha' : 'contêiner OLE'
+  // DOCX/XLSX/PPTX com senha de abertura deixam de ser ZIP e viram um OLE com EncryptedPackage.
+  const encrypted = has('EncryptedPackage')
+  const kind = encrypted ? 'Office com senha (DOCX/XLSX/PPTX criptografado)' : has('WordDocument') ? 'Word 97-2003 (.doc)' : has('Workbook') || has('Book') ? 'Excel 97-2003 (.xls)' : has('PowerPoint Document') ? 'PowerPoint 97-2003 (.ppt)' : [...names].some((item) => item.startsWith('__substg1.0_')) ? 'mensagem do Outlook (.msg)' : 'contêiner OLE'
   const checks: Check[] = [ok('Estrutura', `Contêiner OLE (setores de ${sector} bytes): ${kind}.`)]
   if ((bytes.length - 512) % sector !== 0) checks.push(warn('Tamanho', 'O tamanho não fecha em setores inteiros: pode estar truncado.'))
-  if (has('EncryptedPackage')) checks.push(warn('Proteção', 'Documento criptografado com senha: o conteúdo não pôde ser inspecionado.'))
+  if (encrypted) checks.push(warn('Proteção', 'Tem senha para abrir: o documento está criptografado e o conteúdo não pôde ser inspecionado.'))
+  else if (has('WordDocument') || has('Workbook') || has('Book')) {
+    const locked = legacyPassword(bytes, sector, has('WordDocument'))
+    checks.push(locked === null ? warn('Proteção', 'Não foi possível confirmar se tem senha para abrir.') : locked ? warn('Proteção', 'Tem senha para abrir (criptografia do Office 97-2003).') : ok('Proteção', 'Sem senha para abrir.'))
+  } else if (has('PowerPoint Document')) checks.push(warn('Proteção', 'Senha em .ppt antigo não é verificada aqui.'))
   if (has('_VBA_PROJECT') || has('Macros') || (has('VBA') && has('dir'))) checks.push(bad('Macro', 'Contém projeto VBA: o documento tem macro.'))
   if (has('Ole10Native')) checks.push(warn('Objeto embutido', 'Tem objeto OLE embutido (Ole10Native), que pode carregar um executável.'))
   if (has('ObjectPool')) checks.push(warn('Objeto embutido', 'Tem objetos embutidos (ObjectPool).'))
-  return checks
+  return { kind: encrypted ? 'encrypted' : 'ole', checks }
 }
 
 function inspectRtf(bytes: Uint8Array): Check[] {
@@ -332,6 +354,15 @@ function inspectRtf(bytes: Uint8Array): Check[] {
   checks.push(depth === 0 ? ok('Estrutura', 'RTF com chaves balanceadas.') : bad('Estrutura', `${Math.abs(depth)} ${depth > 0 ? 'chaves abertas sem fechar: truncado' : 'chaves fechadas sobrando'}.`))
   if (/\\objdata|\\object\b/.test(text)) checks.push(warn('Objeto embutido', 'Tem objeto embutido (\\object), um vetor clássico de ataque em RTF.'))
   return checks
+}
+
+// /P guarda as permissões em bits (PDF 32000-1, tabela 22); bit desligado é ação bloqueada.
+function pdfProtection(text: string): Check {
+  if (!/\/Encrypt\b/.test(text)) return ok('Proteção', 'Sem senha e sem restrições.')
+  const flags = /\/P\s+(-?\d+)/.exec(text)?.[1]
+  const rights: [number, string][] = [[3, 'imprimir'], [4, 'editar'], [5, 'copiar texto'], [6, 'comentar']]
+  const blocked = flags === undefined ? [] : rights.filter(([bit]) => (Number(flags) & (1 << (bit - 1))) === 0).map(([, name]) => name)
+  return warn('Proteção', `Criptografado: pode ter senha para abrir${blocked.length ? ` e bloqueia ${blocked.join(', ')}` : ''}.`)
 }
 
 async function inspectPdf(bytes: Uint8Array): Promise<Check[]> {
@@ -360,7 +391,7 @@ async function inspectPdf(bytes: Uint8Array): Promise<Check[]> {
   } catch (error) {
     checks.unshift(bad('Estrutura', `O PDF não abre: a estrutura interna está ilegível (${error instanceof Error ? error.message.split('\n')[0] : 'erro de leitura'}).`))
   }
-  if (/\/Encrypt\b/.test(text)) checks.push(warn('Proteção', 'PDF criptografado ou com senha de permissões.'))
+  checks.push(pdfProtection(text))
   if (keys.has('/JavaScript') || keys.has('/JS')) checks.push(bad('Conteúdo ativo', 'Tem JavaScript embutido.'))
   if (keys.has('/Launch')) checks.push(bad('Conteúdo ativo', 'Tem ação /Launch, que tenta abrir um programa.'))
   if (keys.has('/OpenAction') || keys.has('/AA')) checks.push(warn('Ação automática', 'Executa uma ação ao abrir (/OpenAction ou /AA).'))
@@ -414,7 +445,7 @@ async function inspectZip(bytes: Uint8Array, extension: string): Promise<{ kind:
   }
   if (bomb) checks.push(bad('Bomba de compressão', `Declara ${size(declared)} descompactado (${Math.round(ratio)}× o tamanho): padrão de zip bomb. O conteúdo não foi extraído.`))
   else checks.push(corrupted ? bad('Estrutura', `Entrada corrompida (${corrupted}).`) : ok('Estrutura', `${KIND_LABEL[kind]} com ${entries.length} ${entries.length === 1 ? 'entrada' : 'entradas'}, todas com CRC correto.`))
-  if (!bomb && kind === 'zip') checks.push(ok('Compressão', `Descompacta para ${size(declared)}.`))
+  if (!bomb && kind === 'zip') checks.push(ok('Compressão', `Descompacta para ${size(declared)}.`), ok('Proteção', 'Sem senha.'))
   // O JSZip limpa ../ do nome; o nome cru fica em unsafeOriginalName e é ele que escaparia da pasta ao extrair.
   const raw = entries.map((entry) => (entry as unknown as { unsafeOriginalName?: string }).unsafeOriginalName ?? entry.name)
   const slip = raw.filter((name) => /(^|[\\/])\.\.([\\/]|$)|^[\\/]|^[a-z]:/i.test(name))
@@ -427,7 +458,10 @@ async function inspectZip(bytes: Uint8Array, extension: string): Promise<{ kind:
   if (['odt', 'ods', 'odp'].includes(kind)) {
     const scripts = names.filter((name) => /^(Basic|Scripts)\//.test(name) && !/script-lc\.xml$|dialog-lc\.xml$/.test(name))
     checks.push(scripts.length ? bad('Macro', `Tem macro (${scripts[0]}).`) : ok('Macro', 'Sem macros.'))
-    if (has('content.xml')) checks.push(...checkXml(await zip.file('content.xml')!.async('string')).map((check) => ({ ...check, label: 'XML do conteúdo' })))
+    const manifest = has('META-INF/manifest.xml') ? await zip.file('META-INF/manifest.xml')!.async('string') : ''
+    const sealed = manifest.includes('encryption-data')
+    checks.push(sealed ? warn('Proteção', 'Tem senha para abrir: o conteúdo está criptografado.') : ok('Proteção', 'Sem senha para abrir.'))
+    if (has('content.xml') && !sealed) checks.push(...checkXml(await zip.file('content.xml')!.async('string')).map((check) => ({ ...check, label: 'XML do conteúdo' })))
   }
   return { kind, checks }
 }
@@ -445,6 +479,7 @@ async function officeChecks(zip: JSZip, names: string[], kind: string, extension
   const enabled = ['DOCM', 'XLSM', 'PPTM'].includes(extension)
   if (macro) checks.push(enabled ? warn('Macro', `Tem macro VBA (${macro}), como se espera de .${extension.toLowerCase()}.`) : bad('Macro', `Tem macro VBA (${macro}) num .${extension.toLowerCase() || 'zip'}: o formato não deveria ter macro.`))
   else checks.push(ok('Macro', 'Sem macros VBA.'))
+  checks.push(await officeProtection(zip, names, kind, xml ?? ''))
   if (names.some((name) => /\/activeX\//i.test(name))) checks.push(warn('ActiveX', 'Tem controles ActiveX.'))
   const embedded = names.filter((name) => /\/embeddings\//i.test(name))
   if (embedded.length) checks.push(warn('Objeto embutido', `Tem ${embedded.length === 1 ? 'um objeto embutido' : `${embedded.length} objetos embutidos`} (${embedded[0].split('/').pop()}).`))
@@ -457,6 +492,31 @@ async function officeChecks(zip: JSZip, names: string[], kind: string, extension
     break
   }
   return checks
+}
+
+// Chegando aqui o pacote abriu sem senha (com senha seria um OLE criptografado); o que pode haver é trava de edição.
+async function officeProtection(zip: JSZip, names: string[], kind: string, main: string): Promise<Check> {
+  const read = async (name: string) => (await zip.file(name)?.async('string')) ?? ''
+  const locks: string[] = []
+  if (kind === 'docx') {
+    const settings = await read('word/settings.xml')
+    const guard = /<w:documentProtection\b[^>]*>/.exec(settings)?.[0] ?? ''
+    if (guard && /w:enforcement="(1|true|on)"/.test(guard)) {
+      const modes: Record<string, string> = { readOnly: 'somente leitura', comments: 'só comentários', trackedChanges: 'só com controle de alterações', forms: 'só preencher formulários' }
+      locks.push(modes[/w:edit="(\w+)"/.exec(guard)?.[1] ?? ''] ?? 'edição restrita')
+    }
+    if (/<w:writeProtection\b/.test(settings)) locks.push('senha para gravar alterações')
+  }
+  if (kind === 'xlsx') {
+    if (/<workbookProtection\b/.test(main)) locks.push('estrutura da pasta travada')
+    if (/<fileSharing\b[^>]*(password|hashValue)/i.test(main)) locks.push('senha para gravar alterações')
+    const sheets = names.filter((name) => /^xl\/worksheets\/[^/]+\.xml$/.test(name))
+    let locked = 0
+    for (const sheet of sheets) if (/<sheetProtection\b/.test(await read(sheet))) locked += 1
+    if (locked) locks.push(`${locked} de ${sheets.length} ${sheets.length === 1 ? 'planilha protegida' : 'planilhas protegidas'}`)
+  }
+  if (kind === 'pptx' && /<p:modifyVerifier\b/.test(main)) locks.push('senha para gravar alterações')
+  return locks.length ? warn('Proteção', `Sem senha para abrir, mas com proteção: ${locks.join('; ')}.`) : ok('Proteção', 'Sem senha para abrir e sem trava de edição.')
 }
 
 function inspectText(bytes: Uint8Array, extension: string): Check[] {
@@ -498,7 +558,7 @@ export async function inspectFile(file: InFile): Promise<Verdict> {
   const { name, bytes } = file
   const extension = extensionOf(name)
   const checks: Check[] = [bytes.length ? ok('Tamanho', size(bytes.length)) : warn('Tamanho', 'Arquivo vazio (0 B).'), ...nameChecks(name)]
-  if (!bytes.length) return verdict(name, checks, LABELS)
+  if (!bytes.length) return report(name, checks)
   let kind = sniff(bytes)
   const structure: Check[] = []
   if (kind === 'pdf') structure.push(...await inspectPdf(bytes))
@@ -513,7 +573,11 @@ export async function inspectFile(file: InFile): Promise<Verdict> {
     const result = await inspectZip(bytes, extension)
     kind = result.kind
     structure.push(...result.checks)
-  } else if (kind === 'ole') structure.push(...inspectOle(bytes))
+  } else if (kind === 'ole') {
+    const result = inspectOle(bytes)
+    kind = result.kind
+    structure.push(...result.checks)
+  }
   else if (kind === 'exe') structure.push(...inspectExe(bytes))
   else if (kind === 'elf') structure.push(bad('Conteúdo ativo', 'Executável Linux (ELF).'))
   else if (kind === 'rtf') structure.push(...inspectRtf(bytes))
@@ -528,7 +592,7 @@ export async function inspectFile(file: InFile): Promise<Verdict> {
   else checks.push(ok('Extensão', `.${extension.toLowerCase()} confere com o conteúdo.`))
   checks.push(...structure)
   checks.push(ok('SHA-256', await sha256(bytes)))
-  return verdict(name, checks, LABELS)
+  return report(name, checks)
 }
 
 export async function inspectFiles(files: InFile[]) {

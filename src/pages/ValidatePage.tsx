@@ -233,7 +233,7 @@ export function ValidatePage({ id, query, onToast }: { id: string; query: URLSea
         {!verdicts ? <p className="muted">{fileMode ? 'Envie arquivos' : 'Cole os valores'} e clique em Validar. O botão Exemplos traz casos bons e ruins para ver o que cada conferência pega.</p> : null}
         {verdicts ? (
           <p className="verdict-count">
-            {counts.map(([tone, count]) => count || tone !== 'warn' ? <span key={tone} className={`tone ${tone}`}>{count} {tone === 'ok' ? (count === 1 ? 'aprovado' : 'aprovados') : tone === 'warn' ? 'com alerta' : count === 1 ? 'reprovado' : 'reprovados'}</span> : null)}
+            {counts.map(([tone, count]) => count || tone !== 'warn' ? <span key={tone} className={`tone ${tone}`}>{count} {fileMode ? (tone === 'ok' ? 'sem observações' : tone === 'warn' ? 'com observações' : 'pedem atenção') : tone === 'ok' ? (count === 1 ? 'aprovado' : 'aprovados') : tone === 'warn' ? 'com alerta' : count === 1 ? 'reprovado' : 'reprovados'}</span> : null)}
           </p>
         ) : null}
         {verdicts?.map((item, index) => (

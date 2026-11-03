@@ -1,4 +1,4 @@
-# MassForge
+# Toki
 
 Gerador local de massas de teste. Os dados, os textos e os arquivos são produzidos no navegador.
 

@@ -1,5 +1,7 @@
 import { useEffect, useId, useState, type FormEvent } from 'react'
 import { key } from '../domain/mfEngine.ts'
+import { optionIcon } from './optionIcon.ts'
+import { TypePicker } from './TypePicker.tsx'
 
 export type EngineField = {
   k: string
@@ -11,6 +13,8 @@ export type EngineField = {
   presets?: number[]
   sample?: string
   custom?: boolean
+  // Mostra a escolha como cartões com ícone; a lista diz quais ficam à mostra quando há mais de 4 opções.
+  cards?: string[]
 }
 
 export function fieldVisible(field: EngineField, config: Record<string, unknown>) {
@@ -235,6 +239,21 @@ export function FieldList({
     const help = fieldHelp(field, config)
     const label = fieldLabel(field, config)
     const id = `${uid}-${field.k}`
+    if (field.cards && (field.type === 'seg' || field.type === 'sel')) {
+      return (
+        <div className="field field-cards" key={field.k}>
+          <span className="field-name">{label}</span>
+          {help ? <Tip text={help} /> : null}
+          <TypePicker
+            label={label}
+            main={field.cards}
+            value={String(config[field.k] ?? '')}
+            options={fieldOptions(field, config).map((option) => ({ value: option, label: option, icon: optionIcon(option) }))}
+            onChange={(value) => onChange(field.k, value)}
+          />
+        </div>
+      )
+    }
     return (
       <div className="field" key={field.k}>
         {field.type === 'tog' ? <span aria-hidden="true">&nbsp;</span> : <label className="field-name" htmlFor={id}>{label}</label>}

@@ -53,7 +53,7 @@ export function Barcode({ digits }: { digits: string }) {
   )
 }
 
-export function QrMark({ value }: { value: string }) {
+export function QrMark({ value, label = 'QR Code do PIX sintético' }: { value: string; label?: string }) {
   const qr = create(value, { errorCorrectionLevel: 'M' })
   const size = qr.modules.size
   const cells = []
@@ -63,7 +63,7 @@ export function QrMark({ value }: { value: string }) {
     }
   }
   return (
-    <svg className="boleto-qr" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="QR Code do PIX sintético">
+    <svg className="boleto-qr" viewBox={`0 0 ${size} ${size}`} role="img" aria-label={label}>
       {cells}
     </svg>
   )

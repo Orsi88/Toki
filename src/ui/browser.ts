@@ -19,7 +19,10 @@ export async function copyText(value: string) {
 export function downloadBytes(filename: string, bytes: Uint8Array, mime: string) {
   const copy = new Uint8Array(bytes.byteLength)
   copy.set(bytes)
-  const blob = new Blob([copy], { type: mime })
+  downloadBlob(filename, new Blob([copy], { type: mime }))
+}
+
+export function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -27,7 +30,7 @@ export function downloadBytes(filename: string, bytes: Uint8Array, mime: string)
   document.body.appendChild(link)
   link.click()
   link.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 2000)
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 export function downloadText(filename: string, text: string, mime = 'text/plain;charset=utf-8') {

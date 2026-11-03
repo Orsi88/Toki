@@ -141,10 +141,12 @@ export function GeneratorPage({
   id,
   query,
   onToast,
+  firstStep = 1,
 }: {
   id: string
   query: URLSearchParams
   onToast: (message: string | Notice, bad?: boolean) => void
+  firstStep?: number
 }) {
   const engine = (ENG as unknown as Record<string, {
     kind: string
@@ -298,7 +300,7 @@ export function GeneratorPage({
       {visibleSteps.map((step, index) => (
         <section className="step" key={step.title}>
           <header className="step-title">
-            <b>{index + 1}</b>
+            <b>{index + firstStep}</b>
             <div>
               <div className="step-heading">
                 <h2>{step.title}</h2>
@@ -318,7 +320,7 @@ export function GeneratorPage({
       ))}
       <section className="step">
         <header className="step-title">
-          <b>{visibleSteps.length + 1}</b>
+          <b>{visibleSteps.length + firstStep}</b>
           <div>
             <h2>Defina a geração do lote</h2>
             <p>Quantidade, data de referência e seed usada na exportação.</p>

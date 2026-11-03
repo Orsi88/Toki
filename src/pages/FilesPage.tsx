@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { FAM, FILE_DEF, FILE_FIELDS, fmtBytes } from '../domain/mfEngine.ts'
-import { generateFiles, validateFileRequest, zipArtifacts, folderPreview, sanitizeFolder, type FileRequest, type FolderMode } from '../domain/files.ts'
-import { downloadBytes, downloadNotice, type Notice } from '../ui/browser.ts'
+import { FILE_BYTE_LIMIT, FILE_COUNT_LIMIT, FILE_TOTAL_LIMIT, generateFiles, validateFileRequest, zipArtifacts, folderPreview, sanitizeFolder, type FileRequest, type FolderMode } from '../domain/files.ts'
+import { downloadBlob, downloadNotice, type Notice } from '../ui/browser.ts'
 import { FieldList, type EngineField } from '../ui/Fields.tsx'
 import { ClearButton } from '../ui/ClearButton.tsx'
 import { SearchField } from '../ui/SearchField.tsx'
@@ -19,6 +19,7 @@ export function FilesPage({
   const [folderMode, setFolderMode] = useState<FolderMode>('familia')
   const [folderName, setFolderName] = useState('arquivos_teste')
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState('')
   const [summary, setSummary] = useState('')
   const request = useMemo<FileRequest>(() => ({
     sel: selected,
@@ -55,9 +56,10 @@ export function FilesPage({
   async function generate() {
     setBusy(true)
     try {
-      const produced = await generateFiles(request, Math.floor(Math.random() * 1_000_000_000))
-      const zip = await zipArtifacts(produced)
-      downloadBytes(`${sanitizeFolder(folderName)}.zip`, zip, 'application/zip')
+      const count = (value: number) => value.toLocaleString('pt-BR')
+      const produced = await generateFiles(request, Math.floor(Math.random() * 1_000_000_000), (done, total) => setProgress(`Gerando ${count(done)} de ${count(total)}...`))
+      const zip = await zipArtifacts(produced, (percent) => setProgress(`Compactando ${percent}%...`))
+      downloadBlob(`${sanitizeFolder(folderName)}.zip`, zip)
       const total = produced.reduce((sum, file) => sum + file.sizeBytes, 0)
       const byExtension = new Map<string, number>()
       for (const file of produced) byExtension.set(file.extension, (byExtension.get(file.extension) ?? 0) + file.sizeBytes)
@@ -68,6 +70,7 @@ export function FilesPage({
       onToast(caught instanceof Error ? caught.message : 'Falha ao gerar arquivos.', true)
     } finally {
       setBusy(false)
+      setProgress('')
     }
   }
 
@@ -168,8 +171,12 @@ export function FilesPage({
         <pre className="tree">{preview}</pre>
         {error ? <p className="banner bad">{error}</p> : null}
         <button id="mf-generate" className="primary" type="button" disabled={Boolean(error) || busy} onClick={generate}>
-          {busy ? 'Gerando...' : 'Gerar arquivos'}
+          {busy ? progress || 'Gerando...' : 'Gerar arquivos'}
         </button>
+        <p className="muted file-limits">
+          Até {FILE_COUNT_LIMIT.toLocaleString('pt-BR')} arquivos e {fmtBytes(FILE_TOTAL_LIMIT)} por lote, com no máximo {fmtBytes(FILE_BYTE_LIMIT)} por arquivo.
+          Tudo é gerado no seu navegador, então lotes grandes usam bastante memória e podem levar alguns minutos.
+        </p>
         {summary ? <p className="file-summary">{summary}</p> : null}
       </section>
     </div>

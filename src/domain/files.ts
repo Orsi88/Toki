@@ -4,9 +4,10 @@ import { buildDocument } from './documents.ts'
 import { sha256 } from './export.ts'
 import { mediaRequestError, realMedia, type MediaRequest } from './media.ts'
 
-export const FILE_BYTE_LIMIT = 8 * 1024 * 1024
-export const FILE_TOTAL_LIMIT = 32 * 1024 * 1024
-export const FILE_COUNT_LIMIT = 100
+// Tudo é montado na memória do navegador, e o JSZip não escreve ZIP64.
+export const FILE_BYTE_LIMIT = 1024 ** 3
+export const FILE_TOTAL_LIMIT = 2 * 1024 ** 3
+export const FILE_COUNT_LIMIT = 10_000
 
 export type FolderMode = 'raiz' | 'unica' | 'familia' | 'extensao'
 
@@ -96,10 +97,10 @@ function targetBytes(request: FileRequest) {
 }
 
 function randomBytes(length: number, seed: number) {
-  const bytes = new Uint8Array(length)
+  const words = new Uint32Array(Math.ceil(length / 4))
   const random = rng(seed)
-  for (let index = 0; index < length; index += 1) bytes[index] = Math.floor(random() * 256)
-  return bytes
+  for (let index = 0; index < words.length; index += 1) words[index] = random() * 4294967296
+  return new Uint8Array(words.buffer, 0, length)
 }
 
 function concat(parts: Uint8Array[]) {
@@ -121,9 +122,9 @@ async function realBytes(extension: string, seed: number, name: string, request:
   const ext = extension.toUpperCase()
   const media = await realMedia(ext, request)
   if (media) return media
-  if (ext === 'TXT') return textBytes('MassForge\nArquivo de texto para teste de upload.\n')
+  if (ext === 'TXT') return textBytes('Toki\nArquivo de texto para teste de upload.\n')
   if (ext === 'EML') {
-    return textBytes('From: teste@exemplo.com.br\r\nTo: qa@exemplo.com.br\r\nSubject: MassForge\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nCorpo ficticio para teste.\r\n')
+    return textBytes('From: teste@exemplo.com.br\r\nTo: qa@exemplo.com.br\r\nSubject: Toki\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nCorpo ficticio para teste.\r\n')
   }
   if (ext === 'ZIP' || ext === 'ODT' || ext === 'ODS' || ext === 'ODP') return odfOrZip(ext, name)
   if (ext === 'PDF' || ext === 'DOCX' || ext === 'XLSX' || ext === 'PPTX') {
@@ -137,7 +138,7 @@ async function realBytes(extension: string, seed: number, name: string, request:
     const built = await buildDocument({
       format,
       components,
-      meta: { nome: name, titulo: 'Arquivo de teste', autor: 'MassForge', pagina: 'A4', orient: 'Retrato', conteudo: 'Normal' },
+      meta: { nome: name, titulo: 'Arquivo de teste', autor: 'Toki', pagina: 'A4', orient: 'Retrato', conteudo: 'Normal' },
       seed,
     })
     return built.bytes
@@ -148,7 +149,7 @@ async function realBytes(extension: string, seed: number, name: string, request:
 async function odfOrZip(extension: string, name: string) {
   const zip = new JSZip()
   if (extension === 'ZIP') {
-    zip.file('leia-me.txt', `Arquivo ${name} gerado pelo MassForge para teste.\n`)
+    zip.file('leia-me.txt', `Arquivo ${name} gerado pelo Toki para teste.\n`)
     return zip.generateAsync({ type: 'uint8array' })
   }
   const mimeTypes: Record<string, string> = {
@@ -159,7 +160,7 @@ async function odfOrZip(extension: string, name: string) {
   const mime = mimeTypes[extension] ?? 'application/octet-stream'
   zip.file('mimetype', mime, { compression: 'STORE' })
   zip.file('META-INF/manifest.xml', `<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"><manifest:file-entry manifest:media-type="${mime}" manifest:full-path="/"/><manifest:file-entry manifest:media-type="text/xml" manifest:full-path="content.xml"/></manifest:manifest>`)
-  zip.file('content.xml', `<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:p>MassForge</text:p></office:text></office:body></office:document-content>`)
+  zip.file('content.xml', `<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:p>Toki</text:p></office:text></office:body></office:document-content>`)
   return zip.generateAsync({ type: 'uint8array' })
 }
 
@@ -175,7 +176,7 @@ function magic(extension: string) {
 }
 
 function inertText(extension: string) {
-  return textBytes(`MassForge fixture inerte .${extension.toLowerCase()}\nEste arquivo nao contem codigo executavel.\n`)
+  return textBytes(`Toki fixture inerte .${extension.toLowerCase()}\nEste arquivo nao contem codigo executavel.\n`)
 }
 
 export function validateFileRequest(request: FileRequest) {
@@ -185,7 +186,7 @@ export function validateFileRequest(request: FileRequest) {
   }
   const total = request.sel.length * request.qtd
   if (total > FILE_COUNT_LIMIT) return `O lote tem ${total} arquivos. O teto é ${FILE_COUNT_LIMIT}.`
-  if (!request.vazio && request.conteudo !== 'Estrutura real' && request.conteudo !== 'Extensão divergente') {
+  if (!request.vazio && (request.conteudo === 'Simulado' || request.conteudo === 'Corrompido')) {
     try {
       const bytes = targetBytes(request)
       if (bytes * total > FILE_TOTAL_LIMIT) {
@@ -200,13 +201,29 @@ export function validateFileRequest(request: FileRequest) {
   return null
 }
 
-export async function generateFiles(request: FileRequest, seed: number): Promise<FileArtifact[]> {
+export type Progress = (done: number, total: number) => void
+
+// Devolve a vez ao navegador para a tela pintar o progresso entre um arquivo e outro.
+function breather() {
+  let last = performance.now()
+  return async () => {
+    if (performance.now() - last < 50) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    last = performance.now()
+  }
+}
+
+export async function generateFiles(request: FileRequest, seed: number, onProgress?: Progress): Promise<FileArtifact[]> {
   const error = validateFileRequest(request)
   if (error) throw new Error(error)
   const artifacts: FileArtifact[] = []
+  const total = request.sel.length * request.qtd
+  const pause = breather()
   let running = 0
   for (const extension of request.sel) {
     for (let index = 0; index < request.qtd; index += 1) {
+      onProgress?.(artifacts.length, total)
+      await pause()
       const suffix = request.qtd === 1 && request.sel.length === 1 ? '' : `_${artifacts.length + 1}`
       const filename = fileName({ ...FILE_DEF, ...request }, extension, suffix)
       const folder = folderPath(request.folderMode ?? 'raiz', request.folderName ?? 'arquivos_teste', extension)
@@ -254,10 +271,11 @@ export async function generateFiles(request: FileRequest, seed: number): Promise
       })
     }
   }
+  onProgress?.(artifacts.length, total)
   return artifacts
 }
 
-export async function zipArtifacts(artifacts: FileArtifact[]) {
+export async function zipArtifacts(artifacts: FileArtifact[], onProgress?: Progress) {
   const zip = new JSZip()
   const used = new Set<string>()
   for (const artifact of artifacts) {
@@ -274,7 +292,7 @@ export async function zipArtifacts(artifacts: FileArtifact[]) {
     used.add(entry.toLocaleLowerCase('pt-BR'))
     zip.file(entry, artifact.bytes)
   }
-  return zip.generateAsync({ type: 'uint8array' })
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/zip' }, (meta) => onProgress?.(Math.floor(meta.percent), 100))
 }
 
 export { fmtBytes }

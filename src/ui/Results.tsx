@@ -5,6 +5,8 @@ import { mapEmbed } from '../domain/geo.ts'
 import { parseColor } from '../domain/values.ts'
 import { Barcode, QrMark } from './codes.tsx'
 import { CopyButton } from './CopyButton.tsx'
+import { QrCode } from './EventPass.tsx'
+import { QrDialog } from './QrDialog.tsx'
 
 type IdentityMeta = {
   first?: string
@@ -18,6 +20,11 @@ type IdentityMeta = {
 
 function valueOf(item: GeneratedItem, key: string) {
   return item.fields.find((field) => field.key === key)?.v ?? ''
+}
+
+// Campos cujo conteúdo é para virar QR: o QR dos eventos e o copia e cola do PIX.
+function isQr(key: string, value: string) {
+  return Boolean(value) && (key === 'qr' || key === 'payload' || value.startsWith('000201'))
 }
 
 function columnsOf(items: GeneratedItem[]) {
@@ -49,8 +56,10 @@ export function ValueResults({
 }
 
 function FieldStack({ item, onCopy }: { item: GeneratedItem; onCopy: (value: string) => void }) {
+  const qr = item.fields.find((field) => isQr(field.key, field.v))
   return (
     <div className="stack">
+      {qr ? <div className="qr-inline"><QrCode value={qr.v} size={180} label={qr.k} /></div> : null}
       <p><span className={`tone ${item.tone}`}>{item.tag}</span></p>
       {item.fields.map((field) => (
         <div key={field.key} className="copy-row">
@@ -233,6 +242,7 @@ function IdentityCard({ item, onCopy }: { item: GeneratedItem; onCopy: (value: s
 }
 
 function Sheet({ items, onCopy }: { items: GeneratedItem[]; onCopy: (value: string) => void }) {
+  const [qr, setQr] = useState<string | null>(null)
   const columns = columnsOf(items)
   const visible = items.slice(0, 100)
   return (
@@ -257,6 +267,7 @@ function Sheet({ items, onCopy }: { items: GeneratedItem[]; onCopy: (value: stri
                     <span className="cell">
                       <button type="button" className="cell-hit" title="Clique para copiar" onClick={() => onCopy(value)}>{displayValue(value)}</button>
                       <CopyButton label={`Copiar ${column.label}`} onCopy={() => onCopy(value)} />
+                      {isQr(column.key, value) ? <button type="button" className="qr-open" onClick={() => setQr(value)}>Ver QR</button> : null}
                     </span>
                   </td>
                 )
@@ -273,6 +284,7 @@ function Sheet({ items, onCopy }: { items: GeneratedItem[]; onCopy: (value: stri
         </tbody>
       </table>
       {items.length > visible.length ? <p className="muted">Exibindo {visible.length} de {items.length}. Baixar CSV inclui todos.</p> : null}
+      {qr ? <QrDialog value={qr} onClose={() => setQr(null)} onCopy={onCopy} /> : null}
     </div>
   )
 }

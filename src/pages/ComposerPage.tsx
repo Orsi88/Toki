@@ -5,8 +5,11 @@ import { buildDocument, type DocComponent, type DocFormat, type DocMeta } from '
 import { downloadBytes, downloadNotice, type Notice } from '../ui/browser.ts'
 import { ClearButton } from '../ui/ClearButton.tsx'
 import { FieldList, type EngineField } from '../ui/Fields.tsx'
+import { optionIcon } from '../ui/optionIcon.ts'
+import { TypePicker } from '../ui/TypePicker.tsx'
 
 const FORMATS: DocFormat[] = ['Word', 'Excel', 'PowerPoint', 'PDF']
+const FORMAT_HELP: Record<DocFormat, string> = { Word: 'Texto, tabelas e imagens.', Excel: 'Abas, fórmulas e gráficos.', PowerPoint: 'Slides com lista e gráfico.', PDF: 'Páginas com timbre.' }
 
 const SECTION_HINTS: Record<string, string> = {
   cabecalho: 'Texto no topo de cada página.',
@@ -49,7 +52,7 @@ export function ComposerPage({
   const [meta, setMeta] = useState<Record<string, unknown>>({
     nome: 'documento_teste',
     titulo: 'Relatório de testes',
-    autor: 'MassForge',
+    autor: 'Toki',
     pagina: 'A4',
     orient: 'Retrato',
     conteudo: 'Normal',
@@ -79,7 +82,7 @@ export function ComposerPage({
     setMeta({
       nome: 'documento_teste',
       titulo: 'Relatório de testes',
-      autor: 'MassForge',
+      autor: 'Toki',
       pagina: 'A4',
       orient: 'Retrato',
       conteudo: 'Normal',
@@ -153,14 +156,12 @@ export function ComposerPage({
             <p>Word e PDF saem com o timbre e a marca d’água. Excel e PowerPoint seguem o formato de cada um.</p>
           </div>
         </header>
-        <div className="fields">
-          <label className="field">
-            <span>Formato do documento</span>
-            <select value={current} onChange={(event) => changeFormat(event.target.value as DocFormat)}>
-              {FORMATS.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-        </div>
+        <TypePicker
+          label="Formato do documento"
+          value={current}
+          options={FORMATS.map((item) => ({ value: item, label: item, desc: FORMAT_HELP[item], icon: optionIcon(item) }))}
+          onChange={(value) => changeFormat(value as DocFormat)}
+        />
       </section>
       <section className="step">
         <header className="step-title">

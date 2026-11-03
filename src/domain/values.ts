@@ -275,7 +275,7 @@ export function descriptionValue(random: () => number, size: string) {
     'Produto de teste para carga de catálogo.',
     'Embalagem fictícia, sem estoque real.',
     'Descrição usada só para validar limite de texto.',
-    'Item sintético do gerador MassForge.',
+    'Item sintético do gerador Toki.',
   ]
   const target = size === 'Extensa' ? 8 : size === 'Curta' ? 1 : 3
   const parts: string[] = []

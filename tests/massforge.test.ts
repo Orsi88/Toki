@@ -103,6 +103,38 @@ describe('arquivos e documentos', () => {
     expect(files[0].sizeBytes).toBe(128)
   })
 
+  it('alonga o parágrafo médio e o longo', async () => {
+    const meta = { nome: 'relatorio', titulo: 'Relatorio', autor: 'QA', pagina: 'A4' as const, orient: 'Retrato' as const, conteudo: 'Normal' as const }
+    const built = await buildDocument({
+      format: 'Word',
+      components: [
+        { id: 'c', type: 'paragrafo', props: { qtd: 1, tam: 'Curto', negrito: false, italico: false } },
+        { id: 'm', type: 'paragrafo', props: { qtd: 1, tam: 'Médio', negrito: false, italico: false } },
+        { id: 'l', type: 'paragrafo', props: { qtd: 1, tam: 'Longo', negrito: false, italico: false } },
+      ],
+      meta,
+      seed: 1,
+    })
+    const zip = await JSZip.loadAsync(built.bytes)
+    const xml = await zip.file('word/document.xml')?.async('string')
+    const texts = [...String(xml).matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((match) => match[1])
+    const lines = (text: string) => {
+      const words = text.split(/\s+/)
+      let count = 1
+      let column = 0
+      for (const word of words) {
+        const next = column === 0 ? word.length : column + 1 + word.length
+        if (column > 0 && next > 85) { count += 1; column = word.length } else column = next
+      }
+      return count
+    }
+    expect(lines(texts[0])).toBeGreaterThanOrEqual(3)
+    expect(lines(texts[0])).toBeLessThan(8)
+    expect(lines(texts[1])).toBeGreaterThanOrEqual(25)
+    expect(lines(texts[2])).toBeGreaterThanOrEqual(30)
+    expect(lines(texts[2])).toBeLessThan(36)
+  })
+
   it('grava um docx que contém o título', async () => {
     const built = await buildDocument({
       format: 'Word',
@@ -133,7 +165,7 @@ describe('arquivos e documentos', () => {
     const header = await zip.file('word/header1.xml')?.async('string')
     const footer = await zip.file('word/footer1.xml')?.async('string')
     expect(header).toContain('documento de teste')
-    expect(header).toContain('34532F')
+    expect(header).toContain('66504B')
     expect(footer).toContain('Dados ficticios para teste')
     expect(footer).toContain('PAGE')
     const pdf = await buildDocument({ format: 'PDF', components, meta, seed: 1 })
@@ -262,7 +294,7 @@ describe('mídia e valores novos', () => {
       nome: 'clipe', nomeVar: 'Simples', vazio: false, tam: 1, unid: 'KB', conteudo: 'Estrutura real', real: 'PNG', qtd: 1,
       videoDur: 8, videoRes: '640×360', videoOrient: 'Horizontal', videoFps: 15, videoAudio: false,
     }
-    expect(validateFileRequest({ ...base, sel: ['AVI'] })).toMatch(/AVI/)
+    expect(validateFileRequest({ ...base, sel: ['AVI'], qtd: 30 })).toMatch(/lote de mídia/)
     const wav = await generateFiles({
       ...base, sel: ['WAV'], audioDur: 1, audioRate: 8000, audioChannels: 1, audioKind: 'Silêncio', videoDur: 1, videoFps: 8,
     }, 3)

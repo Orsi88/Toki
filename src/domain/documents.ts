@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import { PDFDocument, PDFName, PDFString, StandardFonts, rgb } from 'pdf-lib'
-import { LIST_ITEMS, PARA, rng } from './mfEngine.ts'
+import { LoremIpsum } from 'lorem-ipsum'
+import { rng } from './mfEngine.ts'
 
 export type DocFormat = 'Word' | 'Excel' | 'PowerPoint' | 'PDF'
 export type DocComponent = { id: string; type: string; props: Record<string, unknown> }
@@ -14,22 +15,27 @@ export type DocMeta = {
 }
 
 const LIMITS = { paragraphs: 400, rows: 2000, cells: 20000 }
-const WATERMARK_FILE = 'marca-dagua-bloco-1254x1254-verde-claro-transparente.png'
-
-let watermarkBytes: Promise<Uint8Array> | undefined
-
-function loadWatermark() {
-  watermarkBytes ??= readWatermark()
-  return watermarkBytes
+// O Word põe a marca no cabeçalho e precisa da transparência. No PDF ela é a primeira coisa
+// desenhada na página branca, e o JPEG entra sem o pdf-lib decodificar o PNG a cada documento.
+const WATERMARK_FILES = {
+  png: 'marca-dagua-bloco-512x512-verde-claro-transparente.png',
+  jpg: 'marca-dagua-bloco-512x512-verde-claro-fundo-branco.jpg',
 }
 
-async function readWatermark() {
+const watermarkBytes: Partial<Record<keyof typeof WATERMARK_FILES, Promise<Uint8Array>>> = {}
+
+function loadWatermark(kind: keyof typeof WATERMARK_FILES) {
+  watermarkBytes[kind] ??= readWatermark(WATERMARK_FILES[kind])
+  return watermarkBytes[kind]
+}
+
+async function readWatermark(file: string) {
   if (import.meta.env.VITEST) {
     const { readFile } = await import('node:fs/promises')
     const { join } = await import('node:path')
-    return new Uint8Array(await readFile(join(process.cwd(), 'public', 'imagens', WATERMARK_FILE)))
+    return new Uint8Array(await readFile(join(process.cwd(), 'public', 'imagens', file)))
   }
-  const response = await fetch(`/imagens/${WATERMARK_FILE}`)
+  const response = await fetch(`/imagens/${file}`)
   if (!response.ok) throw new Error('Não foi possível carregar a marca d’água.')
   return new Uint8Array(await response.arrayBuffer())
 }
@@ -52,11 +58,37 @@ function factorOf(meta: DocMeta) {
   return meta.conteudo === 'Extenso' ? 10 : 1
 }
 
-function paragraphText(index: number, size: unknown) {
-  const base = PARA[index % PARA.length]
-  if (size === 'Curto') return base.split('.')[0] + '.'
-  if (size === 'Longo') return `${base} ${PARA[(index + 1) % PARA.length]} ${PARA[(index + 2) % PARA.length]}`
-  return base
+const PARAGRAPH_LINE = 85
+
+function paragraphLines(text: string) {
+  const words = text.split(/\s+/).filter(Boolean)
+  if (!words.length) return 0
+  let lines = 1
+  let column = 0
+  for (const word of words) {
+    const next = column === 0 ? word.length : column + 1 + word.length
+    if (column > 0 && next > PARAGRAPH_LINE) {
+      lines += 1
+      column = word.length
+    } else column = next
+  }
+  return lines
+}
+
+function loremFor(seed: number) {
+  return new LoremIpsum({ random: rng(seed), wordsPerSentence: { min: 5, max: 14 } })
+}
+
+function paragraphText(lorem: LoremIpsum, size: unknown) {
+  const target = size === 'Longo' ? 30 : size === 'Curto' ? 3 : 25
+  let text = lorem.generateSentences(1)
+  while (paragraphLines(text) < target) text = `${text} ${lorem.generateSentences(1)}`
+  return text
+}
+
+function listItem(lorem: LoremIpsum) {
+  const words = lorem.generateWords(lorem.generator.generateRandomInteger(2, 5))
+  return words.charAt(0).toLocaleUpperCase('pt-BR') + words.slice(1)
 }
 
 function safeFile(name: string, extension: string) {
@@ -179,6 +211,7 @@ async function buildDocx(options: { components: DocComponent[]; meta: DocMeta; s
   let paragraphTotal = 0
   let commentIndex = 0
   let sawHeader = false
+  const lorem = loremFor(options.seed)
   for (const component of options.components) {
     const props = component.props
     if (component.type === 'cabecalho') {
@@ -197,13 +230,13 @@ async function buildDocx(options: { components: DocComponent[]; meta: DocMeta; s
       paragraphTotal += amount
       assertBudget(paragraphTotal, 0, 0)
       for (let index = 0; index < amount; index += 1) {
-        body.push(wParagraph(paragraphText(index, props.tam), { bold: Boolean(props.negrito), italic: Boolean(props.italico) }))
+        body.push(wParagraph(paragraphText(lorem, props.tam), { bold: Boolean(props.negrito), italic: Boolean(props.italico) }))
       }
     } else if (component.type === 'lista') {
       const amount = Math.max(1, countOf(props.itens, 4))
       for (let index = 0; index < amount; index += 1) {
         const marker = props.tipo === 'Numerada' ? `${index + 1}. ` : '• '
-        body.push(wParagraph(marker + LIST_ITEMS[index % LIST_ITEMS.length]))
+        body.push(wParagraph(marker + listItem(lorem)))
       }
     } else if (component.type === 'tabela') {
       const rows = Math.max(1, countOf(props.linhas, 5)) * factor
@@ -225,7 +258,7 @@ async function buildDocx(options: { components: DocComponent[]; meta: DocMeta; s
       const id = nextRel('http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', xml(props.url || 'https://exemplo.com.br'))
       hyperlinks.push({ id, url: String(props.url || '') })
       rels[rels.length - 1] = `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xml(props.url || 'https://exemplo.com.br')}" TargetMode="External"/>`
-      body.push(`<w:p><w:hyperlink r:id="${id}"><w:r><w:rPr><w:color w:val="34532F"/><w:u w:val="single"/></w:rPr><w:t>${xml(props.texto || props.url)}</w:t></w:r></w:hyperlink></w:p>`)
+      body.push(`<w:p><w:hyperlink r:id="${id}"><w:r><w:rPr><w:color w:val="66504B"/><w:u w:val="single"/></w:rPr><w:t>${xml(props.texto || props.url)}</w:t></w:r></w:hyperlink></w:p>`)
     } else if (component.type === 'comentario') {
       body.push(`<w:p><w:commentRangeStart w:id="${commentIndex}"/><w:r><w:t>${xml(props.texto || '')}</w:t></w:r><w:commentRangeEnd w:id="${commentIndex}"/><w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="${commentIndex}"/></w:r></w:p>`)
       commentIndex += 1
@@ -262,7 +295,7 @@ async function buildDocx(options: { components: DocComponent[]; meta: DocMeta; s
   zip.file('word/styles.xml', wordStyles())
   zip.file('docProps/core.xml', coreProps(options.meta))
   const contentWidth = size.w - 2268
-  const watermark = await loadWatermark()
+  const watermark = await loadWatermark('png')
   zip.file('word/media/watermark.png', watermark)
   zip.file('word/_rels/header1.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdMark" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/watermark.png"/></Relationships>`)
   zip.file('word/header1.xml', headerXml(`${wordWatermark()}${letterheadLine(String(header?.props.texto || ''), contentWidth)}`))
@@ -298,9 +331,9 @@ function footerXml(inner: string) {
 function letterheadAside(text: string) {
   const raw = text.trim()
   const parts = raw.split(/\s*·\s*/)
-  const branded = parts.length > 1 && parts[0].localeCompare('MassForge', 'pt-BR', { sensitivity: 'accent' }) === 0
+  const branded = parts.length > 1 && parts[0].localeCompare('Toki', 'pt-BR', { sensitivity: 'accent' }) === 0
   const aside = branded ? parts.slice(1).join(' · ') : raw
-  if (!aside || aside.localeCompare('MassForge', 'pt-BR', { sensitivity: 'accent' }) === 0) return ''
+  if (!aside || aside.localeCompare('Toki', 'pt-BR', { sensitivity: 'accent' }) === 0) return ''
   return aside
 }
 
@@ -308,17 +341,17 @@ function letterheadLine(text: string, width: number) {
   const aside = letterheadAside(text)
   const tab = aside ? `<w:tabs><w:tab w:val="right" w:pos="${width}"/></w:tabs>` : ''
   const asideRun = aside
-    ? `<w:r><w:tab/></w:r><w:r><w:rPr><w:color w:val="676B66"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:t>${xml(aside)}</w:t></w:r>`
+    ? `<w:r><w:tab/></w:r><w:r><w:rPr><w:color w:val="716966"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:t>${xml(aside)}</w:t></w:r>`
     : ''
-  return `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="12" w:space="1" w:color="34532F"/></w:pBdr>${tab}<w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Georgia" w:hAnsi="Georgia" w:cs="Georgia"/><w:color w:val="34532F"/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr><w:t>MassForge</w:t></w:r>${asideRun}</w:p>`
+  return `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="12" w:space="1" w:color="66504B"/></w:pBdr>${tab}<w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Georgia" w:hAnsi="Georgia" w:cs="Georgia"/><w:color w:val="66504B"/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr><w:t>Toki</w:t></w:r>${asideRun}</w:p>`
 }
 
 function letterheadFooter(text: string, numbered: boolean, width: number) {
   const tab = numbered ? `<w:tabs><w:tab w:val="right" w:pos="${width}"/></w:tabs>` : ''
   const number = numbered
-    ? `<w:r><w:tab/></w:r><w:r><w:rPr><w:color w:val="34532F"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:rPr><w:color w:val="34532F"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:rPr><w:color w:val="34532F"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:fldChar w:fldCharType="end"/></w:r>`
+    ? `<w:r><w:tab/></w:r><w:r><w:rPr><w:color w:val="66504B"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:rPr><w:color w:val="66504B"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:rPr><w:color w:val="66504B"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:fldChar w:fldCharType="end"/></w:r>`
     : ''
-  return `<w:p><w:pPr><w:pBdr><w:top w:val="single" w:sz="6" w:space="1" w:color="A9BF9C"/></w:pBdr>${tab}</w:pPr><w:r><w:rPr><w:color w:val="676B66"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:t xml:space="preserve">${xml(text)}</w:t></w:r>${number}</w:p>`
+  return `<w:p><w:pPr><w:pBdr><w:top w:val="single" w:sz="6" w:space="1" w:color="A7C4CE"/></w:pBdr>${tab}</w:pPr><w:r><w:rPr><w:color w:val="716966"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr><w:t xml:space="preserve">${xml(text)}</w:t></w:r>${number}</w:p>`
 }
 
 function wordWatermark() {
@@ -336,7 +369,7 @@ function wordWatermark() {
       <a:graphic>
         <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
           <pic:pic>
-            <pic:nvPicPr><pic:cNvPr id="1" name="${WATERMARK_FILE}"/><pic:cNvPicPr><a:picLocks noChangeAspect="1"/></pic:cNvPicPr></pic:nvPicPr>
+            <pic:nvPicPr><pic:cNvPr id="1" name="${WATERMARK_FILES.png}"/><pic:cNvPicPr><a:picLocks noChangeAspect="1"/></pic:cNvPicPr></pic:nvPicPr>
             <pic:blipFill><a:blip r:embed="rIdMark"><a:alphaModFix amt="85000"/></a:blip><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
             <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${side}" cy="${side}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>
           </pic:pic>
@@ -473,7 +506,7 @@ async function buildXlsx(options: { components: DocComponent[]; meta: DocMeta; s
   }
   if (!sheets.length) {
     notes.push('Planilha mínima, sem componentes.')
-    sheets.push({ name: 'Dados', rows: [[options.meta.titulo || 'MassForge']], comments: [], charts: [] })
+    sheets.push({ name: 'Dados', rows: [[options.meta.titulo || 'Toki']], comments: [], charts: [] })
   }
   const zip = new JSZip()
   const overrides = [
@@ -594,6 +627,7 @@ async function buildPptx(options: { components: DocComponent[]; meta: DocMeta; s
     return slides[slides.length - 1]
   }
   let image = false
+  const lorem = loremFor(options.seed)
   for (const component of options.components) {
     const props = component.props
     if (component.type === 'slide') {
@@ -606,10 +640,10 @@ async function buildPptx(options: { components: DocComponent[]; meta: DocMeta; s
     } else if (component.type === 'paragrafo') {
       const amount = Math.max(1, countOf(props.qtd, 1)) * factorOf(options.meta)
       assertBudget(amount, 0, 0)
-      for (let index = 0; index < amount; index += 1) ensure().body.push(paragraphText(index, props.tam))
+      for (let index = 0; index < amount; index += 1) ensure().body.push(paragraphText(lorem, props.tam))
     } else if (component.type === 'lista') {
       const amount = Math.max(1, countOf(props.itens, 4))
-      for (let index = 0; index < amount; index += 1) ensure().body.push(`${props.tipo === 'Numerada' ? `${index + 1}. ` : '• '}${LIST_ITEMS[index % LIST_ITEMS.length]}`)
+      for (let index = 0; index < amount; index += 1) ensure().body.push(`${props.tipo === 'Numerada' ? `${index + 1}. ` : '• '}${listItem(lorem)}`)
     } else if (component.type === 'tabela' || component.type === 'grafico') {
       if (component.type === 'grafico') notes.push('No PowerPoint, o gráfico entra como lista de pontos da série.')
       const points = component.type === 'grafico'
@@ -631,7 +665,7 @@ async function buildPptx(options: { components: DocComponent[]; meta: DocMeta; s
   }
   if (!slides.length) {
     notes.push('Apresentação mínima, sem slides informados.')
-    slides.push({ title: options.meta.titulo || 'MassForge', body: ['Dados fictícios para teste.'], layout: 'Título e conteúdo' })
+    slides.push({ title: options.meta.titulo || 'Toki', body: ['Dados fictícios para teste.'], layout: 'Título e conteúdo' })
   }
   const zip = new JSZip()
   const slideOverrides = slides.map((_, index) => `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join('')
@@ -718,7 +752,7 @@ async function buildPdf(options: { components: DocComponent[]; meta: DocMeta; se
   let page = doc.addPage([size.width, size.height])
   let y = bodyTop()
   const pages = [page]
-  const markPng = await doc.embedPng(await loadWatermark())
+  const markPng = await doc.embedJpg(await loadWatermark('jpg'))
   const paintMark = (target: typeof page) => {
     const side = Math.min(size.width, size.height) * 0.62
     target.drawImage(markPng, {
@@ -732,7 +766,7 @@ async function buildPdf(options: { components: DocComponent[]; meta: DocMeta; se
   paintMark(page)
   const paintChrome = (target: typeof page, index: number) => {
     const top = size.height - 28
-    target.drawText('MassForge', { x: margin, y: top, size: 11, font: bold, color: rgb(0.2, 0.33, 0.18) })
+    target.drawText('Toki', { x: margin, y: top, size: 11, font: bold, color: rgb(0.4, 0.314, 0.294) })
     const aside = letterheadAside(header ? String(header.props.texto || '') : '')
     if (aside) {
       const safe = pdfSafe(aside)
@@ -743,7 +777,7 @@ async function buildPdf(options: { components: DocComponent[]; meta: DocMeta; se
       start: { x: margin, y: size.height - 36 },
       end: { x: size.width - margin, y: size.height - 36 },
       thickness: 1,
-      color: rgb(0.2, 0.33, 0.18),
+      color: rgb(0.4, 0.314, 0.294),
     })
     if (footer) {
       target.drawLine({
@@ -756,7 +790,7 @@ async function buildPdf(options: { components: DocComponent[]; meta: DocMeta; se
       if (footer.props.num !== false) {
         const num = String(index + 1)
         const width = bold.widthOfTextAtSize(num, 9)
-        target.drawText(num, { x: size.width - margin - width, y: 22, size: 9, font: bold, color: rgb(0.2, 0.33, 0.18) })
+        target.drawText(num, { x: size.width - margin - width, y: 22, size: 9, font: bold, color: rgb(0.4, 0.314, 0.294) })
       }
     }
   }
@@ -784,6 +818,7 @@ async function buildPdf(options: { components: DocComponent[]; meta: DocMeta; se
   }
   let paragraphs = 0
   let embedded: Awaited<ReturnType<typeof doc.embedPng>> | null = null
+  const lorem = loremFor(options.seed)
   for (const component of options.components) {
     const props = component.props
     if (component.type === 'cabecalho' || component.type === 'rodape') continue
@@ -800,11 +835,11 @@ async function buildPdf(options: { components: DocComponent[]; meta: DocMeta; se
       const amount = Math.max(1, countOf(props.qtd, 1)) * factorOf(options.meta)
       paragraphs += amount
       assertBudget(paragraphs, 0, 0)
-      for (let index = 0; index < amount; index += 1) write(paragraphText(index, props.tam))
+      for (let index = 0; index < amount; index += 1) write(paragraphText(lorem, props.tam))
     } else if (component.type === 'lista') {
       const amount = Math.max(1, countOf(props.itens, 4))
       for (let index = 0; index < amount; index += 1) {
-        write(`${props.tipo === 'Numerada' ? `${index + 1}.` : '-'} ${LIST_ITEMS[index % LIST_ITEMS.length]}`, { gap: 2 })
+        write(`${props.tipo === 'Numerada' ? `${index + 1}.` : '-'} ${listItem(lorem)}`, { gap: 2 })
       }
     } else if (component.type === 'tabela') {
       const rows = Math.max(1, countOf(props.linhas, 5)) * factorOf(options.meta)
@@ -819,7 +854,7 @@ async function buildPdf(options: { components: DocComponent[]; meta: DocMeta; se
       for (const point of points) {
         need(16)
         const width = ((size.width - margin * 2 - 40) * point.value) / max
-        page.drawRectangle({ x: margin + 36, y: y - 12, width: Math.max(2, width), height: 8, color: rgb(0.37, 0.5, 0.33) })
+        page.drawRectangle({ x: margin + 36, y: y - 12, width: Math.max(2, width), height: 8, color: rgb(0.655, 0.769, 0.808) })
         page.drawText(pdfSafe(point.label), { x: margin, y: y - 12, size: 9, font })
         y -= 16
       }
@@ -827,7 +862,7 @@ async function buildPdf(options: { components: DocComponent[]; meta: DocMeta; se
       const label = pdfSafe(String(props.texto || props.url || 'link'))
       need(16)
       const width = font.widthOfTextAtSize(label, 11)
-      page.drawText(label, { x: margin, y: y - 11, size: 11, font, color: rgb(0.2, 0.33, 0.18) })
+      page.drawText(label, { x: margin, y: y - 11, size: 11, font, color: rgb(0.4, 0.314, 0.294) })
       const annot = doc.context.register(doc.context.obj({
         Type: 'Annot',
         Subtype: 'Link',

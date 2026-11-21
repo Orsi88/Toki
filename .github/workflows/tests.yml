@@ -1,0 +1,35 @@
+name: testes
+
+on:
+  push:
+  pull_request:
+  # Disparo manual ou externo (ex.: pelo painel Nexo), sem precisar de commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Instalar dependências
+        run: npm ci --no-audit --no-fund
+      - name: Lint
+        run: npm run lint
+      - name: Testes
+        # Saída legível no log e um relatório JUnit para quem lê os resultados (ex.: o painel Nexo).
+        run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=test-results/junit.xml
+      - name: Publicar relatório dos testes
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 30

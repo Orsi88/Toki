@@ -55,7 +55,8 @@
 
   const AGREES = { 'E-mail': 'email', Telefone: 'tel', Data: 'date', 'Data de nascimento': 'date', 'Número inteiro': 'number', Idade: 'number' }
 
-  const IGNORED_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'file'])
+  // Upload (file) não é ignorado: vira campo de arquivo, preenchido com um arquivo de exemplo do Toki.
+  const IGNORED_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image'])
   const TECHNICAL = /csrf|xsrf|authenticity|token|captcha|honeypot|^utm_|^_|viewstate|nonce/i
 
   function normalize(text) {
@@ -66,7 +67,7 @@
   }
 
   function ignoreReason(meta) {
-    if (IGNORED_TYPES.has(meta.type)) return meta.type === 'hidden' ? 'oculto' : 'botão ou arquivo'
+    if (IGNORED_TYPES.has(meta.type)) return meta.type === 'hidden' ? 'oculto' : 'botão'
     if (meta.disabled) return 'desabilitado'
     if (meta.readOnly) return 'somente leitura'
     if (meta.hidden) return 'invisível'
@@ -75,6 +76,10 @@
   }
 
   function inferGenerator(meta) {
+    if (meta.type === 'file') {
+      const accept = meta.accept ? ` (aceita ${meta.accept})` : ''
+      return { type: 'Texto curto', confidence: 0.95, source: 'campo de upload', hint: `Upload${accept}: no Preencher recebe um arquivo de exemplo do Toki; na Massa Personalizada vira o nome do arquivo.` }
+    }
     if (meta.options && meta.options.length) {
       const multiple = meta.controlType === 'checkbox-group' || meta.multiple
       return { type: 'Lista de opções', confidence: 0.9, source: 'opções do controle', hint: multiple ? 'Múltipla escolha: o Toki gera uma opção por linha.' : '' }

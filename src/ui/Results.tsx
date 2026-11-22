@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { GeneratedItem } from '../domain/export.ts'
 import { displayValue } from '../domain/export.ts'
 import { mapEmbed } from '../domain/geo.ts'
@@ -50,7 +50,7 @@ export function ValueResults({
   const item = items[0]
   if (!item) return null
   if (id === 'cartao') return <PlasticCard item={item} onCopy={onCopy} />
-  if (id === 'boleto') return <BoletoSlip item={item} onCopy={onCopy} />
+  if (id === 'boleto') return <FitWidth><BoletoSlip item={item} onCopy={onCopy} /></FitWidth>
   if (id === 'identidade') return <IdentityCard item={item} onCopy={onCopy} />
   if (id === 'empresa') return <CompanyCard item={item} onCopy={onCopy} />
   return <FieldStack item={item} onCopy={onCopy} />
@@ -129,6 +129,29 @@ function SlipCell({ label, children, className = '' }: { label: string; children
       <strong>{children}</strong>
     </div>
   )
+}
+
+// Reduz o conteúdo proporcionalmente quando ele não cabe na largura (boleto no celular ou no painel do Moki):
+// mostra o documento inteiro em miniatura, sem cortar nem reorganizar os campos.
+function FitWidth({ children }: { children: ReactNode }) {
+  const outer = useRef<HTMLDivElement>(null)
+  const inner = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const box = outer.current
+    const content = inner.current
+    if (!box || !content) return
+    const fit = () => {
+      content.style.zoom = '1'
+      const need = content.scrollWidth
+      const have = box.clientWidth
+      content.style.zoom = need > have && have > 0 ? String(have / need) : '1'
+    }
+    fit()
+    const observer = new ResizeObserver(fit)
+    observer.observe(box)
+    return () => observer.disconnect()
+  }, [])
+  return <div ref={outer} className="fit-width"><div ref={inner} className="fit-width-inner">{children}</div></div>
 }
 
 function BoletoSlip({ item, onCopy }: { item: GeneratedItem; onCopy: (value: string) => void }) {
@@ -217,6 +240,9 @@ function BoletoSlip({ item, onCopy }: { item: GeneratedItem; onCopy: (value: str
   )
 }
 
+// Campos longos que, no celular, ocupam a linha inteira da ficha.
+const WIDE_FIELDS = new Set(['email', 'endereco', 'razao_social', 'natureza', 'responsavel', 'nome_completo'])
+
 function IdentityCard({ item, onCopy }: { item: GeneratedItem; onCopy: (value: string) => void }) {
   const meta = (item as GeneratedItem & { meta?: IdentityMeta }).meta
   const name = [meta?.first, meta?.last].filter(Boolean).join(' ') || valueOf(item, 'nome') || 'Identidade fictícia'
@@ -241,7 +267,7 @@ function IdentityCard({ item, onCopy }: { item: GeneratedItem; onCopy: (value: s
       </div>
       <div className="id-grid">
         {item.fields.map((field) => (
-          <div key={field.key}>
+          <div key={field.key} className={WIDE_FIELDS.has(field.key) ? 'wide' : undefined}>
             <span>{field.k}<CopyButton label={`Copiar ${field.k}`} onCopy={() => onCopy(field.v)} /></span>
             <strong>{displayValue(field.v)}</strong>
           </div>
@@ -275,7 +301,7 @@ function CompanyCard({ item, onCopy }: { item: GeneratedItem; onCopy: (value: st
       </div>
       <div className="id-grid">
         {item.fields.map((field) => (
-          <div key={field.key}>
+          <div key={field.key} className={WIDE_FIELDS.has(field.key) ? 'wide' : undefined}>
             <span>{field.k}<CopyButton label={`Copiar ${field.k}`} onCopy={() => onCopy(field.v)} /></span>
             <strong>{displayValue(field.v)}</strong>
           </div>

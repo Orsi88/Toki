@@ -29,7 +29,15 @@ function loadWatermark(kind: keyof typeof WATERMARK_FILES) {
   return watermarkBytes[kind]
 }
 
+// Quem não está no site do Toki (a extensão) informa os bytes da marca d'água em vez de buscar /imagens/.
+let watermarkSource: ((file: string) => Uint8Array | undefined) | null = null
+export function setWatermarkSource(source: (file: string) => Uint8Array | undefined) {
+  watermarkSource = source
+}
+
 async function readWatermark(file: string) {
+  const provided = watermarkSource?.(file)
+  if (provided) return provided
   if (import.meta.env.VITEST) {
     const { readFile } = await import('node:fs/promises')
     const { join } = await import('node:path')

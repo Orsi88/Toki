@@ -14,7 +14,8 @@ npm run dev
 Um menu no navegador, como o do Jam: clique no ícone do Toki (ou `Alt+Shift+T`) em qualquer página.
 
 - **Inserir no campo selecionado:** clique num campo da página, abra o menu e escolha Pessoa, CPF, CNPJ, E-mail, Telefone, CEP, Endereço, Data, Cartão, PIX, UUID ou **Mais** (todos os tipos da Massa Personalizada). O valor entra no campo e vai para a área de transferência. O seletor **Válido / Inválido** vale para tudo.
-- **Preencher formulário:** escolha o bloco na página e o Toki preenche tudo com uma pessoa coerente, respeitando opções, limites, confirmação de senha e datas início → fim. Nunca envia o formulário.
+- **Preencher formulário:** escolha o bloco na página e o Toki preenche tudo com uma pessoa coerente, respeitando opções, limites, confirmação de senha e datas início → fim. Campos de upload recebem um arquivo de exemplo do gerador de Arquivos, do tipo pedido pelo `accept` (no modo inválido, um tipo fora dele). Nunca envia o formulário.
+- **Nome das colunas:** vem do texto que acompanha o campo (label, texto logo antes do campo ou placeholder); o nome técnico aparece em letra pequena na revisão.
 - **Capturar para a massa:** leva a estrutura do formulário (sem os valores digitados) para a Massa Personalizada.
 
 Instalar: o ícone de quebra-cabeça no cabeçalho do Toki abre o guia (`#/extensao`), com o download pronto e o passo a passo. Pelo repositório:

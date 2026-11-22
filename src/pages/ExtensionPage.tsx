@@ -115,7 +115,7 @@ export function ExtensionPage({ onToast }: { onToast: (message: string | Notice,
           <article>
             <Glyph d="M5 4h10l4 4v12H5z M14 4v5h5 M8 13h8 M8 17h5" />
             <h3>Preencher formulário</h3>
-            <p>Escolha o bloco com o mouse (↑ amplia, Esc cancela). Tudo é preenchido de uma vez, com senha e confirmação iguais e datas em ordem. O formulário não é enviado.</p>
+            <p>Escolha o bloco com o mouse (↑ amplia, Esc cancela). Tudo é preenchido de uma vez, com senha e confirmação iguais, datas em ordem e um arquivo de exemplo nos campos de upload (do tipo que o campo aceita). O formulário não é enviado.</p>
           </article>
           <article>
             <Glyph d="M4 8V5a1 1 0 0 1 1-1h3 M16 4h3a1 1 0 0 1 1 1v3 M20 16v3a1 1 0 0 1-1 1h-3 M8 20H5a1 1 0 0 1-1-1v-3 M8 10h8 M8 14h5" />

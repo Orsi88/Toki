@@ -35,6 +35,7 @@
 
   function fill(element, value) {
     if (!element || element.disabled || element.readOnly) return false
+    if (element instanceof HTMLInputElement && element.type === 'file') return false // upload: arquivo de exemplo à parte
     if (element.isContentEditable) {
       element.focus()
       document.execCommand('selectAll')

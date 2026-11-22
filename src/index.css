@@ -677,6 +677,8 @@ html[data-theme="dark"] .geo-link, html[data-theme="dark"] .quick button.geo-val
 .plastic label { display: flex; flex-direction: column; gap: 3px; font-size: 9px; font-weight: 600; letter-spacing: .1em; color: #4e574c; }
 .plastic label strong { display: flex; align-items: center; gap: 6px; font-family: var(--font-code); font-size: 13px; letter-spacing: 0; color: #302a2a; }
 .plastic .copy { width: 22px; height: 22px; background: #fff; color: #66504b; border-color: #d5d8d2; }
+.fit-width { width: 100%; min-width: 0; overflow: hidden; display: flex; justify-content: center; }
+.fit-width-inner { width: max-content; max-width: none; }
 .boleto {
   width: min(820px, 100%); align-self: center; background: #fff; color: #1c1917;
   border-radius: 0; padding: 0; display: flex; flex-direction: column;
@@ -1597,10 +1599,20 @@ textarea.code::placeholder { color: var(--muted); opacity: .7; }
   .settings-group { padding: 14px 0; gap: 10px; }
   .appt-main { padding: 16px; gap: 14px; }
   .appt-time { font-size: 24px; }
-  .id-person { padding: 16px; gap: 12px; }
-  .id-person b { width: 52px; height: 52px; font-size: 20px; }
-  .id-person h3 { font-size: 22px; }
-  .id-grid { padding: 0 16px; }
+  /* Fichas de pessoa física e jurídica: mais largura e campos em 2 colunas, sem espaço sobrando */
+  .quick:has(.id-card) { padding: 12px 10px; }
+  .id-card { border-radius: 14px; }
+  .id-card > header { padding: 8px 14px; font-size: 10px; letter-spacing: .08em; }
+  .id-person { padding: 14px; gap: 12px; }
+  .id-person b { width: 48px; height: 48px; font-size: 18px; border-radius: 12px; }
+  .id-person h3 { font-size: 20px; }
+  .id-person p { font-size: 13px; }
+  .id-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14px; padding: 0 14px 6px; }
+  .id-grid > div { padding: 10px 0 11px; }
+  .id-grid span { font-size: 10px; letter-spacing: .04em; }
+  .id-grid span .copy { width: 24px; height: 24px; }
+  .id-grid strong { margin-top: 4px; font-size: 14px; overflow-wrap: break-word; word-break: normal; }
+  .id-grid > .wide { grid-column: 1 / -1; }
   .geo-map { min-height: 220px; }
   .icon-btn, .quick-actions .icon-btn, .lote-actions .icon-btn { width: 40px; min-width: 40px; height: 40px; min-height: 40px; }
 

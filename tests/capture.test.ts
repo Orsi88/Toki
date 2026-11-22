@@ -282,3 +282,20 @@ describe('casos de borda › tipo + lado', () => {
     expect(all.length).toBeGreaterThan(max.length)
   })
 })
+
+describe('extensão › campos de upload', () => {
+  it('reconhece upload e escolhe o arquivo de exemplo pelo accept', async () => {
+    expect(T.ignoreReason({ type: 'file', name: 'anexo' })).toBeNull()
+    expect(T.inferGenerator({ type: 'file', controlType: 'file', accept: 'image/*' }).hint).toMatch(/Upload \(aceita image\/\*\)/)
+    const engine = await import('../src/extension/engine.ts')
+    expect(engine.acceptedExtensions('image/*,.pdf')).toEqual(['PNG', 'PDF'])
+    expect(engine.pickSample('', true)).toEqual({ ext: 'PDF', corrupt: false })
+    expect(engine.pickSample('image/*', false)).toEqual({ ext: 'TXT', corrupt: false })
+    expect(engine.pickSample('', false)).toEqual({ ext: 'PDF', corrupt: true })
+    const png = await engine.sampleFile('image/png')
+    expect(png.name).toMatch(/\.png$/)
+    expect([...png.bytes.slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
+    const pdf = await engine.sampleFile('.pdf')
+    expect(new TextDecoder().decode(pdf.bytes.slice(0, 5))).toBe('%PDF-')
+  })
+})

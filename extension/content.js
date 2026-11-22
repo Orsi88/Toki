@@ -187,6 +187,23 @@
     if (!element.getClientRects().length) return false
     return getComputedStyle(element).visibility !== 'hidden'
   }
+  // Texto que acompanha o campo quando o site usa <div>/<span> como rótulo: o irmão anterior (sem campos dentro),
+  // subindo até 3 níveis enquanto o bloco for só deste campo. Nunca lê valores.
+  function nearbyText(element) {
+    let node = element
+    for (let depth = 0; depth < 3 && node && node !== document.body; depth += 1) {
+      for (let prev = node.previousElementSibling; prev; prev = prev.previousElementSibling) {
+        if (prev.matches(CONTROL) || prev.querySelector(CONTROL)) return ''
+        const text = textWithoutControls(prev)
+        if (text && text.length <= 80) return text
+      }
+      const parent = node.parentElement
+      if (!parent || deepAll(parent, CONTROL).length > 1) return ''
+      node = parent
+    }
+    return ''
+  }
+
   function labelOf(element) {
     const scope = element.getRootNode()
     const by = element.getAttribute('aria-labelledby')
@@ -200,7 +217,7 @@
     if (wrap) return textWithoutControls(wrap)
     if (element.getAttribute('role') && !/^(textbox|combobox)$/.test(element.getAttribute('role'))) return textWithoutControls(element)
     if (scope instanceof ShadowRoot && scope.host.getAttribute('aria-label')) return tidy(scope.host.getAttribute('aria-label'))
-    return tidy(element.getAttribute('placeholder') || element.getAttribute('title') || '')
+    return nearbyText(element) || tidy(element.getAttribute('placeholder') || element.getAttribute('title') || '')
   }
   function numberAttr(element, name) {
     const raw = element.getAttribute(name)
@@ -233,6 +250,7 @@
       step: element.getAttribute('step') || '',
       options,
       datalist: Boolean(list),
+      accept: type === 'file' ? element.getAttribute('accept') || '' : '',
       constraints: {
         minLength: numberAttr(element, 'minlength'), maxLength: numberAttr(element, 'maxlength'),
         min: numberAttr(element, 'min'), max: numberAttr(element, 'max'),
@@ -335,9 +353,34 @@
     return { id: field.key, name: field.key, type, rule, extra: Object.keys(extra).length ? extra : undefined }
   }
 
+  // Campos de upload recebem um arquivo de exemplo do Toki (tipo pedido pelo accept; no inválido, um tipo fora dele).
+  async function attachSamples(uploads, rule, done, missed) {
+    let attached = 0
+    const names = []
+    for (const field of uploads) {
+      try {
+        const sample = await globalThis.TokiEngine.sampleFile(field.accept || '', rule === 'Válido')
+        const transfer = new DataTransfer()
+        transfer.items.add(new File([sample.bytes], sample.name, { type: sample.type }))
+        field.el.files = transfer.files
+        field.el.dispatchEvent(new Event('input', { bubbles: true }))
+        field.el.dispatchEvent(new Event('change', { bubbles: true }))
+        attached += 1
+        names.push(`${sample.name}${sample.corrupt ? ' (corrompido)' : ''}`)
+      } catch {
+        missed.push(field.name)
+      }
+    }
+    const kind = rule === 'Válido' ? 'válidos' : 'inválidos'
+    renderReview({
+      text: `${done + attached} campos preenchidos com dados ${kind}; ${attached ? `anexado: ${names.join(', ')}` : 'nenhum arquivo anexado'}${missed.length ? `; sem preencher: ${missed.join(', ')}` : ''}. O formulário não foi enviado.`,
+    })
+  }
+
   function fillForm(rule) {
     fillRule = rule
-    const targets = fields.filter((field) => field.el || field.items?.length)
+    const targets = fields.filter((field) => (field.el || field.items?.length) && field.controlType !== 'file')
+    const uploads = fields.filter((field) => field.el && field.controlType === 'file')
     if (!targets.length) return { bad: true, text: 'Nenhum campo da página para preencher.' }
     const keys = new Set(fields.map((field) => field.key))
     let record
@@ -376,6 +419,7 @@
       else missed.push(field.name)
     }
     const kind = rule === 'Válido' ? 'válidos' : 'inválidos'
+    if (uploads.length) attachSamples(uploads, rule, done, missed)
     return {
       bad: missed.length > 0 && done === 0,
       text: `${done} campos preenchidos com dados ${kind}${missed.length ? `; sem preencher: ${missed.join(', ')}` : ''}. O formulário não foi enviado.`,

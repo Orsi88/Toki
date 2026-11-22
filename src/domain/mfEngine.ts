@@ -1,5 +1,7 @@
 // @ts-nocheck
 import { buildStructured } from './structures.ts'
+import { companyEngine } from './company.ts'
+import { MATH_DEFAULTS, MATH_FIELDS, MATH_TIPOS, isMathTipo, mathFieldVisible, mathRun } from './math.ts'
 import { coordinateCell, coordinateRows } from './geo.ts'
 import { colorCell, colorValue, descriptionValue, measureCell, measureValue, skuValue } from './values.ts'
 // Regras de geração do Toki, com data de referência injetada pelo job.
@@ -277,11 +279,17 @@ mapa:{kind:'value',pl:['coordenada','coordenadas'],def:{tipo:'Ponto',formato:'De
 ENG.cpf.run=ENG.cnpj.run=null;
 Object.values(ENG).forEach(e=>{if(e.one&&!e.run)e.run=(v,r)=>Array.from({length:Math.max(1,Math.min(+v.qtd||1,1000))},()=>e.one(v,r))});
 const TODAS='Todas as variações';
+// Números e valores › fórmulas e gráficos (src/domain/math.ts). Entra antes do SWEEP para que "Todas as variações" também passe por eles.
+// Dados pessoais › Pessoa jurídica (src/domain/company.ts), com o mesmo CNPJ e a mesma pessoa coerente do motor.
+ENG.empresa=companyEngine({cnpjS,fmtCnpj,person,reference:getReferenceDate,ufs:UFS.filter(u=>u!=='Qualquer')});
+// Dados estruturados começam com um registro útil, não só o ID.
+Object.assign(ENG.estrutura.def,{campos:['ID','Nome completo','CPF','E-mail','Data de nascimento'],registros:3});
+{const e=ENG.numero;const t=e.fields.find(f=>f.k==='tipo');t.opts=[...t.opts,...MATH_TIPOS];Object.assign(e.def,MATH_DEFAULTS);for(const f of e.fields){const old=f.show;f.show=v=>mathFieldVisible(f.k,v)&&(!old||old(v))}const qi=e.fields.findIndex(f=>f.k==='qtd');e.fields.splice(qi,0,...MATH_FIELDS);const run=e.run;e.run=(v,r)=>isMathTipo(v.tipo)?mathRun(v,r):run(v,r)}
 const SWEEP={cpf:['regra'],cnpj:['regra'],nome:['regra'],email:['regra'],telefone:['tipo','regra'],cep:['regra'],nascimento:['faixa'],numero:['tipo','regra'],data:['tipo','regra'],bancario:['regra'],cartao:['regra','validade'],pix:['tipo','regra'],boleto:['regra','vencimento'],borda:['regra']};
 function sweepCombos(axes){let rows=[{}];for(const axis of axes){const next=[];for(const row of rows)for(const opt of axis.opts)next.push({...row,[axis.k]:opt});rows=next}return rows}
 Object.entries(SWEEP).forEach(([id,keys])=>{const e=ENG[id];if(!e||!e.run)return;const axes=keys.map(k=>e.fields.find(f=>f.k===k)).filter(f=>f&&Array.isArray(f.opts));axes.forEach(f=>{if(!f.opts.includes(TODAS))f.opts=[TODAS,...f.opts];const prev=f.help;f.help=v=>{const base=typeof prev==='function'?prev(v):(prev||'');const extra=v[f.k]===TODAS?'Monta uma massa com todas as variações desta lista. A quantidade, quando existe, vale para cada uma.':'';return [base,extra].filter(Boolean).join(' ')}});const original=e.run;e.run=(v,r)=>{const active=axes.filter(f=>v[f.k]===TODAS).map(f=>({k:f.k,opts:f.opts.filter(o=>o!==TODAS)}));if(!active.length)return original(v,r);const out=[];const once=new Set();for(const combo of sweepCombos(active)){if(id==='numero'){const tipo=combo.tipo||v.tipo;if(tipo==='Cor'){if(once.has('Cor'))continue;once.add('Cor')}if(tipo==='Sequência'||v.sinal==='Zero'){const mark=tipo+'|'+(tipo==='Sequência'?'seq':'zero');if(once.has(mark))continue;once.add(mark)}}const produced=original({...v,...combo},r)||[];for(const item of produced){if(item.rule==='nao_se_aplica'||item.rule==='incompativel')continue;const fields=item.fields.slice();for(const axis of active){const keyName=axis.k==='validade'?'regra_validade':axis.k==='regra'||axis.k==='faixa'?'variacao':axis.k;const label=axis.k==='tipo'?'Tipo':axis.k==='validade'?'Validade pedida':'Variação';if(fields.some(field=>field.key===keyName))continue;fields.unshift({k:label,key:keyName,v:String(combo[axis.k])})}out.push({...item,fields});if(out.length>=1000)return out}}return out}});
 
-ENG.numero.quick=v=>{if(v.tipo==='Sequência'||v.sinal==='Zero'||colorTipo(v)||measureTipo(v))return null;const C=numCtx(v);if(C.err)return{title:'Fronteiras do intervalo',help:C.err,items:[]};return{title:`Fronteiras de ${C.fm(C.lo)} a ${C.fm(C.hi)}`,help:C.adj?`Sinal ${v.sinal.toLowerCase()}: ${C.adj}.`:'Seis valores ao redor do mínimo e do máximo configurados.',items:boundary(C).map(b=>({label:b.label,value:C.fm(b.x),rel:b.rel,detail:b.why}))}};
+ENG.numero.quick=v=>{if(isMathTipo(v.tipo)||v.tipo==='Sequência'||v.sinal==='Zero'||colorTipo(v)||measureTipo(v))return null;const C=numCtx(v);if(C.err)return{title:'Fronteiras do intervalo',help:C.err,items:[]};return{title:`Fronteiras de ${C.fm(C.lo)} a ${C.fm(C.hi)}`,help:C.adj?`Sinal ${v.sinal.toLowerCase()}: ${C.adj}.`:'Seis valores ao redor do mínimo e do máximo configurados.',items:boundary(C).map(b=>({label:b.label,value:C.fm(b.x),rel:b.rel,detail:b.why}))}};
 ENG.data.quick=(v,r)=>{if(v.tipo==='Horário')return{title:'Horários de fronteira',help:'Primeiro e último instante do dia e valores impossíveis.',items:[{label:'Início do dia',value:'00:00:00',rel:'lim',detail:'menor horário válido'},{label:'Fim do dia',value:'23:59:59',rel:'lim',detail:'maior horário válido'},{label:'Hora 24',value:'24:00:00',rel:'out',detail:'horas vão de 00 a 23'},{label:'Minuto 60',value:'12:60:00',rel:'out',detail:'minutos vão de 00 a 59'}]};
  let a=parseInt(v.anoMin)||1990,b=parseInt(v.anoMax)||2030;if(a>b)[a,b]=[b,a];const off={'UTC−03:00':-3,'UTC':0,'UTC−05:00':-5,'UTC+01:00':1}[v.fuso]||0;const offS=off===0?'Z':(off<0?'-':'+')+p2(Math.abs(off))+':00';const fd=v.tipo==='Data'||v.tipo==='Data e hora'?v.formato:'DD/MM/AAAA';
  const O=dt=>{const y=dt.getFullYear(),m=dt.getMonth()+1,d=dt.getDate();return v.tipo==='Data'?fmtYMD(y,m,d,fd):v.tipo==='Data e hora'?fmtYMD(y,m,d,fd)+' 00:00:00':v.tipo==='Timestamp Unix'?String(Math.floor(Date.UTC(y,m-1,d)/1000-off*3600)):`${y}-${p2(m)}-${p2(d)}T00:00:00${offS}`};
@@ -416,7 +424,17 @@ const CATS=[
 ];
 
 // Escolhas de tipo mostradas como cartões com ícone. A lista são as que ficam à mostra; o resto vai para "Outros".
-const CARDS={numero:{tipo:['Inteiro','Decimal','Monetário']},estrutura:{formato:['JSON','XML','CSV']},data:{tipo:['Data','Horário','Data e hora']},texto:{modo:[]},borda:{regra:['Comprimento máximo','Valor máximo','Nulo e vazio']},pix:{tipo:['CPF','E-mail','Telefone']}};
+// Dados pessoais são escolhidos por pessoa física ou jurídica; os geradores avulsos seguem acessíveis pela busca.
+{const c=CATS.find(x=>x.id==='pessoais');c.desc='Fichas completas de pessoa física ou jurídica, com documentos, contato e endereço coerentes.';c.cards.splice(1,0,{name:'Pessoa jurídica',eng:'empresa',desc:'Razão social, nome fantasia, CNPJ, natureza, porte, contato e endereço.',kw:'empresa pj razão social nome fantasia cnpj porte mei ltda'});const pf=c.cards.find(x=>x.eng==='identidade');pf.name='Pessoa física';pf.kw=(pf.kw||'')+' identidade fictícia pf';pf.desc='Nome, nascimento, CPF, e-mail, telefone e endereço; escolha os campos e as regras.'}
+const CARDS={numero:{tipo:['Inteiro','Decimal','Monetário']},estrutura:{formato:['JSON','XML','CSV']},data:{tipo:['Data','Horário','Data e hora']},texto:{modo:[]},borda:{regra:['Comprimento máximo','Valor máximo','Nulo e vazio']},pix:{tipo:['CPF','E-mail','Telefone']},mapa:{tipo:[]}};
+// Casos de borda: "Comprimento máximo/mínimo" e "Valor máximo/mínimo" viram um tipo + o lado do limite.
+// Fica depois do SWEEP: o run envolvido monta a regra antiga e "Todas as variações" segue usando o SWEEP.
+{const e=ENG.borda;const regra=e.fields.find(f=>f.k==='regra');const TIPOS=['Comprimento','Valor','Nulo e vazio','Caracteres especiais','Valores extremos','Duplicidade'];const medida=v=>v.tipoBorda==='Comprimento'||v.tipoBorda==='Valor';
+e.fields.splice(e.fields.indexOf(regra),1,{k:'tipoBorda',label:'Tipo de caso',type:'seg',opts:[TODAS,...TIPOS],cards:[]},{k:'lado',label:'Lado do limite',type:'seg',opts:['Máximo','Mínimo'],show:medida});
+const lim=e.fields.find(f=>f.k==='limite');if(lim)lim.show=v=>v.tipoBorda===TODAS||medida(v);
+Object.assign(e.def,{tipoBorda:'Comprimento',lado:'Máximo'});
+const toRegra=v=>v.tipoBorda===TODAS?TODAS:medida(v)?`${v.tipoBorda} ${String(v.lado||'Máximo').toLowerCase()}`:v.tipoBorda;
+const run=e.run;e.run=(v,r)=>run({...v,regra:toRegra(v)},r)}
 Object.entries(CARDS).forEach(([id,fields])=>Object.entries(fields).forEach(([k,main])=>{const f=ENG[id]&&ENG[id].fields.find(x=>x.k===k);if(f)f.cards=main}));
 {const f=FILE_FIELDS.find(x=>x.k==='conteudo');if(f)f.cards=['Estrutura real','Simulado','Corrompido']}
 

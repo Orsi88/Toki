@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { CATS, ENG, FAM } from './domain/mfEngine.ts'
 import { STRATEGIES, type StrategyId } from './domain/strategy/index.ts'
 import type { Notice } from './ui/browser.ts'
 import { ComposerPage } from './pages/ComposerPage.tsx'
 import { CustomPage } from './pages/CustomPage.tsx'
+import { TypeStrip, type StripGroup } from './ui/TypeStrip.tsx'
+import { ExtensionPage } from './pages/ExtensionPage.tsx'
 import { FilesPage } from './pages/FilesPage.tsx'
 import { GeneratorPage } from './pages/GeneratorPage.tsx'
 import { CategoryIcon } from './ui/Icons.tsx'
@@ -31,7 +33,7 @@ const SHORT: Record<string, string> = {
   arquivos: 'Qualquer extensão, tamanho e conteúdo para testar upload.',
   documentos: 'Word, Excel, PowerPoint e PDF sob medida.',
   textos: 'Tamanho exato, acentos, emojis e símbolos.',
-  pessoais: 'CPF, CNPJ, e-mail, telefone e endereço.',
+  pessoais: 'Pessoa física ou jurídica, com ficha completa.',
   numeros: 'Inteiros, decimais, moedas, cores e medidas.',
   financeiro: 'Cartões, PIX e boletos.',
   estruturados: 'JSON, XML, CSV, SQL, QR e código de barras.',
@@ -40,6 +42,38 @@ const SHORT: Record<string, string> = {
   mapas: 'Coordenadas e áreas, dentro ou fora do mapa.',
   eventos: 'Ingressos, credenciais, inscrições e cupons com QR.',
   combinadas: 'Suas colunas e regras, em CSV ou JSON.',
+}
+
+// Cada categoria ganha uma cor e uma etiqueta com um exemplo do que gera: bate o olho e já sabe o que tem ali.
+const LOOK: Record<string, { tint: string; sample: string[] }> = {
+  arquivos: { tint: '#a7c4ce', sample: ['.pdf', '.png', '.zip', '.csv'] },
+  documentos: { tint: '#b9cde6', sample: ['.docx', '.xlsx', '.pptx'] },
+  textos: { tint: '#e6c3d1', sample: ['Ação 🦊 @#&'] },
+  pessoais: { tint: '#b9d8c2', sample: ['123.456.789-09'] },
+  numeros: { tint: '#efdc9c', sample: ['R$ 1.234,56', '42 %'] },
+  financeiro: { tint: '#f2c9a8', sample: ['•••• 4242', 'PIX'] },
+  estruturados: { tint: '#c9c3e6', sample: ['{ "id": 1 }'] },
+  datas: { tint: '#a8d5d0', sample: ['22/11 · 14:03'] },
+  borda: { tint: '#f0b8a8', sample: ["' OR 1=1 --", 'null'] },
+  mapas: { tint: '#c8d5b9', sample: ['-23.55, -46.63'] },
+  eventos: { tint: '#ecc1c4', sample: ['TKT-0042'] },
+  combinadas: { tint: '#e2d1b5', sample: ['nome', 'cpf', 'email'] },
+}
+
+// Tipos de uma categoria mostrados no topo do gerador, para trocar sem voltar. Dados pessoais vêm em grupos.
+const STRIP_GROUPS: Record<string, { label: string; engines: string[] }[]> = {
+  pessoais: [{ label: '', engines: ['identidade', 'empresa'] }],
+}
+const STRIP_ICON: Record<string, string> = { identidade: 'ficha', empresa: 'cnpj' }
+const STRIP_LABEL: Record<string, string> = { identidade: 'Pessoa física', empresa: 'Pessoa jurídica' }
+
+function stripFor(category: Category | undefined): StripGroup[] | null {
+  const cards = (category?.cards ?? []).filter((card) => card.eng && !card.soon)
+  if (!category || new Set(cards.map((card) => card.eng)).size < 2) return null
+  const item = (card: Card) => ({ value: card.eng!, label: STRIP_LABEL[card.eng!] ?? card.name, icon: STRIP_ICON[card.eng!] ?? card.eng!, hint: card.desc })
+  const groups = STRIP_GROUPS[category.id]
+  if (!groups) return [{ items: cards.map(item) }]
+  return groups.map((group) => ({ label: group.label || undefined, items: group.engines.flatMap((engine) => cards.filter((card) => card.eng === engine).map(item)) }))
 }
 
 function fold(value: string) {
@@ -89,6 +123,7 @@ function parseRoute(hash: string) {
   if (parts[0] === 'files') return { page: 'files' as const, query: params }
   if (parts[0] === 'docs') return { page: 'docs' as const, query: params }
   if (parts[0] === 'massa') return { page: 'custom' as const, query: params }
+  if (parts[0] === 'extensao') return { page: 'extension' as const, query: params }
   if (parts[0] === 'eventos') return { page: 'events' as const, query: params }
   if (parts[0] === 'scan') return { page: 'scan' as const, query: params }
   if (parts[0] === 'estrategia') {
@@ -212,7 +247,7 @@ export default function App() {
               ? 'Massa por estratégia'
               : route.page === 'strategy'
                 ? STRATEGIES.find((item) => item.id === route.id)?.name || 'Massa por estratégia'
-              : route.page === 'scan' ? 'Leitor' : cardFor(categories, route.id, route.query)?.name || 'Gerador'
+              : route.page === 'scan' ? 'Leitor' : route.page === 'extension' ? 'Extensão do navegador' : (() => { const category = categories.find((item) => item.cards.some((card) => card.eng === route.id)); return category && category.cards.length > 1 && new Set(category.cards.map((card) => card.eng)).size === 1 ? category.name : cardFor(categories, route.id, route.query)?.name || 'Gerador' })()
 
   return (
     <div className="shell">
@@ -238,6 +273,17 @@ export default function App() {
             </div>
           )}
         </SearchField>
+        <a
+          className="top-icon"
+          href="#/extensao"
+          aria-label="Extensão do navegador: como ativar e usar"
+          title="Extensão do navegador: como ativar e usar"
+          aria-current={route.page === 'extension' ? 'page' : undefined}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 4.5a2 2 0 1 1 4 0V6h3.5A1.5 1.5 0 0 1 18 7.5V11h1.5a2 2 0 1 1 0 4H18v3.5a1.5 1.5 0 0 1-1.5 1.5H13v-1.5a2 2 0 1 0-4 0V20H5.5A1.5 1.5 0 0 1 4 18.5V15h1.5a2 2 0 1 0 0-4H4V7.5A1.5 1.5 0 0 1 5.5 6H9V4.5Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+          </svg>
+        </a>
         <button
           type="button"
           className="theme-toggle"
@@ -311,11 +357,24 @@ export default function App() {
                 <span className="card-star-go" aria-hidden="true">→</span>
               </button>
               {categories.map((category) => (
-                <button key={category.id} className="card" type="button" onClick={() => go(categoryHref(category))}>
-                  <span className="card-icon"><CategoryIcon name={category.icon} /></span>
-                  <span className="card-go" aria-hidden="true">→</span>
+                <button
+                  key={category.id}
+                  className="card card-cat"
+                  type="button"
+                  style={LOOK[category.id] ? { '--tint': LOOK[category.id].tint } as CSSProperties : undefined}
+                  onClick={() => go(categoryHref(category))}
+                >
+                  <span className="card-cat-top">
+                    <span className="card-icon"><CategoryIcon name={category.icon} /></span>
+                    {LOOK[category.id] ? (
+                      <span className="card-sample" aria-hidden="true">
+                        {LOOK[category.id].sample.map((value) => <span key={value}>{value}</span>)}
+                      </span>
+                    ) : null}
+                  </span>
                   <h2>{category.name}</h2>
                   <p>{SHORT[category.id] ?? category.desc}</p>
+                  <span className="card-go" aria-hidden="true">→</span>
                 </button>
               ))}
             </div>
@@ -381,11 +440,15 @@ export default function App() {
         {route.page === 'events' && <EventsPage query={route.query} onToast={notify} />}
         {route.page === 'finance' && <FinancePage query={route.query} onToast={notify} />}
         {route.page === 'scan' && <ScanPage query={route.query} />}
+        {route.page === 'generator' && currentCategory && stripFor(currentCategory) ? (
+          <TypeStrip label={`Tipos de ${currentCategory.name}`} groups={stripFor(currentCategory)!} value={route.id} onChange={(engine) => go(`#/g/${engine}`)} />
+        ) : null}
         {route.page === 'generator' && Boolean((ENG as Record<string, unknown>)[route.id]) ? <GeneratorPage key={`${route.id}?${route.query.toString()}`} id={route.id} query={route.query} onToast={notify} /> : null}
         {route.page === 'generator' && !((ENG as Record<string, unknown>)[route.id]) ? <p className="banner bad">Esse gerador não está no catálogo.</p> : null}
         {route.page === 'files' && <FilesPage extension={route.query.get('ext') || undefined} onToast={notify} />}
         {route.page === 'docs' && <ComposerPage format={route.query.get('fmt') || undefined} onToast={notify} />}
-        {route.page === 'custom' && <CustomPage onToast={notify} />}
+        {route.page === 'custom' && <CustomPage query={route.query} onToast={notify} />}
+        {route.page === 'extension' && <ExtensionPage onToast={notify} />}
         {route.page === 'strategy-home' && <StrategyChooser onOpen={(id) => go(`#/estrategia/${id}`)} />}
         {route.page === 'strategy' && <StrategyPage key={route.id} strategy={route.id as StrategyId} onToast={notify} />}
         </div>

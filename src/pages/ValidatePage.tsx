@@ -26,8 +26,10 @@ function initialConfig(id: string, query: URLSearchParams) {
 
 function reportCsv(verdicts: Verdict[]) {
   const cell = (value: string) => `"${value.replace(/"/g, '""')}"`
-  const rows = [['entrada', 'resultado', 'resumo', 'conferencias'].map(cell).join(',')]
-  for (const item of verdicts) rows.push([item.input, item.title, item.summary, item.checks.map((check) => `${check.label}: ${check.detail}`).join(' | ')].map(cell).join(','))
+  const rows = [['entrada', 'propriedade', 'descricao', 'calculo'].map(cell).join(',')]
+  for (const item of verdicts) {
+    for (const check of item.checks) rows.push([item.input, check.label, check.detail, check.calc ? (check.tone === 'ok' ? 'válido' : 'inválido') : ''].map(cell).join(','))
+  }
   return `\ufeff${rows.join('\r\n')}`
 }
 
@@ -157,8 +159,6 @@ export function ValidatePage({ id, query, onToast }: { id: string; query: URLSea
     onToast('Configurações e conferência limpas.')
   }
 
-  const counts = verdicts ? (['ok', 'warn', 'bad'] as const).map((tone) => [tone, verdicts.filter((item) => item.tone === tone).length] as const) : []
-  let step = 0
 
   return (
     <div className="work">
@@ -166,7 +166,7 @@ export function ValidatePage({ id, query, onToast }: { id: string; query: URLSea
       <p className="validate-intro">{spec.intro}</p>
       {spec.picker || spec.fields.length || spec.usesDate ? (
         <section className="step">
-          <header className="step-title"><b>{++step}</b><div><h2>Defina a conferência</h2><p>O que for deixado vazio não é conferido.</p></div></header>
+          <header className="step-title"><div><h2>Defina a conferência</h2><p>O que for deixado vazio não é conferido.</p></div></header>
           {spec.picker ? <TypePicker label={spec.picker.label} options={spec.picker.options} value={String(config[spec.picker.key])} onChange={(value) => update(spec.picker!.key, value)} /> : null}
           {spec.fields.length ? <FieldList fields={spec.fields} config={config} onChange={update} /> : null}
           {spec.usesDate ? (
@@ -177,7 +177,7 @@ export function ValidatePage({ id, query, onToast }: { id: string; query: URLSea
         </section>
       ) : null}
       <section className="step">
-        <header className="step-title"><b>{++step}</b><div><h2>{spec.heading(config)}</h2><p>{spec.hint(config)}</p></div></header>
+        <header className="step-title"><div><h2>{spec.heading(config)}</h2><p>{spec.hint(config)}</p></div></header>
         {fileMode ? (
           <div
             className={dragging ? 'dropzone over' : 'dropzone'}
@@ -209,7 +209,7 @@ export function ValidatePage({ id, query, onToast }: { id: string; query: URLSea
           />
         )}
         <div className="tool-actions">
-          <button type="button" disabled={Boolean(busy)} title="Casos bons e ruins para ver o que cada conferência pega" onClick={examples}><ActionIcon name="examples" />Exemplos</button>
+          <button type="button" disabled={Boolean(busy)} title="Valores variados para ver as propriedades de cada um" onClick={examples}><ActionIcon name="examples" />Exemplos</button>
           {fileMode ? <button type="button" disabled={Boolean(busy)} onClick={() => picker.current?.click()}><ActionIcon name="upload" />Escolher arquivos</button> : null}
           {!fileMode && spec.accept ? <button type="button" disabled={Boolean(busy)} onClick={() => picker.current?.click()}><ActionIcon name="upload" />Enviar arquivo</button> : null}
           {!fileMode && spec.qrImages ? <button type="button" disabled={Boolean(busy)} title="Lê QR Code ou código de barras de uma foto" onClick={() => images.current?.click()}><ActionIcon name="image" />Ler imagem</button> : null}
@@ -230,32 +230,39 @@ export function ValidatePage({ id, query, onToast }: { id: string; query: URLSea
       {scanOpen && session ? <ScanDialog session={session} category={id} connected={phone.connected} received={phone.received} onClose={() => setScanOpen(false)} /> : null}
       <section className="panel" id="resultado">
         <header className="preview-head"><h2>Resultado</h2></header>
-        {!verdicts ? <p className="muted">{fileMode ? 'Envie arquivos' : 'Cole os valores'} e clique em Validar. O botão Exemplos traz casos bons e ruins para ver o que cada conferência pega.</p> : null}
+        {!verdicts ? <p className="muted">{fileMode ? 'Envie arquivos' : 'Cole os valores'} e clique em Validar. O botão Exemplos traz valores variados para ver as propriedades de cada um.</p> : null}
         {verdicts ? (
           <p className="verdict-count">
-            {counts.map(([tone, count]) => count || tone !== 'warn' ? <span key={tone} className={`tone ${tone}`}>{count} {fileMode ? (tone === 'ok' ? 'sem observações' : tone === 'warn' ? 'com observações' : 'pedem atenção') : tone === 'ok' ? (count === 1 ? 'aprovado' : 'aprovados') : tone === 'warn' ? 'com alerta' : count === 1 ? 'reprovado' : 'reprovados'}</span> : null)}
+            <span className="tone">{verdicts.length} {verdicts.length === 1 ? 'valor analisado' : 'valores analisados'}</span>
+            {[...new Set(verdicts.filter((item) => item.calc && item.calc !== 'Válido' && item.calc !== 'Inválido').map((item) => item.calc))].map((label) => (
+              <span key={label} className={`tone ${verdicts.find((item) => item.calc === label)?.tone}`}>{verdicts.filter((item) => item.calc === label).length} · {label}</span>
+            ))}
+            {verdicts.some((item) => item.calc === 'Válido') ? <span className="tone ok">{verdicts.filter((item) => item.calc === 'Válido').length} válidos pelo cálculo</span> : null}
+            {verdicts.some((item) => item.calc === 'Inválido') ? <span className="tone bad">{verdicts.filter((item) => item.calc === 'Inválido').length} inválidos pelo cálculo</span> : null}
           </p>
         ) : null}
         {verdicts?.map((item, index) => (
-          <article key={`${index}-${item.input}`} className={`verdict ${item.tone}`}>
+          <article key={`${index}-${item.input}`} className="props">
             <header>
-              <span className={`tone ${item.tone}`}>{item.title}</span>
-              <code title={item.input}>{item.input}</code>
+              <code title={item.input}>{item.input || '(vazio)'}</code>
+              {item.calc && !item.checks.some((check) => check.calc) ? <span className={`tone ${item.tone}`}>{item.calc}</span> : null}
             </header>
-            <p>{item.summary}</p>
-            <ul>
+            <dl>
               {item.checks.map((check, at) => (
-                <li key={`${check.label}-${at}`} className={check.tone}>
-                  <strong>{check.label}</strong>
-                  <span>{/^https:\/\/www\.openstreetmap\.org\//.test(check.detail) ? <a href={check.detail} target="_blank" rel="noreferrer">Abrir no mapa</a> : check.detail}</span>
-                </li>
+                <div key={`${check.label}-${at}`} className={check.calc ? 'calc' : undefined}>
+                  <dt>{check.label}</dt>
+                  <dd>
+                    {check.calc ? <span className={`tone ${check.tone === 'ok' ? 'ok' : 'bad'}`}>{check.tone === 'ok' ? 'Válido' : 'Inválido'}</span> : null}
+                    {/^https:\/\/www\.openstreetmap\.org\//.test(check.detail) ? <a href={check.detail} target="_blank" rel="noreferrer">Abrir no mapa</a> : check.detail}
+                  </dd>
+                </div>
               ))}
-            </ul>
+            </dl>
           </article>
         ))}
         {verdicts?.length ? (
           <div className="row-actions">
-            <button type="button" className="download" onClick={() => { downloadText('conferencia.csv', reportCsv(verdicts), 'text/csv;charset=utf-8'); onToast(downloadNotice('conferencia.csv')) }}>Baixar relatório CSV</button>
+            <button type="button" className="download" onClick={() => { downloadText('conferencia.csv', reportCsv(verdicts), 'text/csv;charset=utf-8'); onToast(downloadNotice('conferencia.csv')) }}>Baixar propriedades (CSV)</button>
           </div>
         ) : null}
       </section>

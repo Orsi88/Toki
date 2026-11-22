@@ -161,7 +161,7 @@ function inspectJpeg(bytes: Uint8Array): Check[] {
   let dims = ''
   let exif = false
   while (at + 4 <= bytes.length) {
-    if (bytes[at] !== 0xff) return [bad('Estrutura', `Marcador inválido na posição ${at}: dados corrompidos.`)]
+    if (bytes[at] !== 0xff) return [bad('Estrutura', `Byte 0x${bytes[at].toString(16).padStart(2, '0').toUpperCase()} na posição ${at}, onde o marcador JPEG é 0xFF.`)]
     const marker = bytes[at + 1]
     if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01 || marker === 0xff) {
       at += marker === 0xff ? 1 : 2

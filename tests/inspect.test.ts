@@ -14,7 +14,10 @@ import { ENG, FILE_DEF, cpfD, rng, setReferenceDate } from '../src/domain/mfEngi
 import { VALIDATORS } from '../src/ui/validators.ts'
 
 const DAY = new Date(2026, 10, 2, 12)
-const tones = (outcome: { verdicts: { tone: string }[] }) => outcome.verdicts.map((item) => item.tone)
+// A tela não mostra veredito: cada valor é uma ficha de propriedades. As propriedades ainda carregam o que o
+// investigador detectou (tone interno), e é isso que estes testes conferem.
+const level = (item: { checks: { tone: string }[] }) => item.checks.some((check) => check.tone === 'bad') ? 'bad' : item.checks.some((check) => check.tone === 'warn') ? 'warn' : 'ok'
+const tones = (outcome: { verdicts: { checks: { tone: string }[] }[] }) => outcome.verdicts.map(level)
 const label = (outcome: { verdicts: { checks: { label: string; tone: string }[] }[] }, index: number, name: string) => outcome.verdicts[index].checks.find((check) => check.label === name)?.tone
 
 async function file(sel: string, extra: Record<string, unknown> = {}) {
@@ -30,7 +33,7 @@ describe('investigador de arquivos', () => {
   })
 
   it('acusa corrompido, truncado e extensão trocada', async () => {
-    expect((await inspectFile({ name: 'x.pdf', bytes: await file('PDF', { conteudo: 'Corrompido' }) })).tone).toBe('bad')
+    expect(level(await inspectFile({ name: 'x.pdf', bytes: await file('PDF', { conteudo: 'Corrompido' }) }))).toBe('bad')
     const truncated = await inspectFile({ name: 'x.png', bytes: await file('PNG', { conteudo: 'Truncado' }) })
     expect(truncated.checks.find((check) => check.label === 'Estrutura')?.detail).toMatch(/truncada/)
     const swapped = await inspectFile({ name: 'x.pdf', bytes: await file('PNG') })
@@ -57,7 +60,7 @@ describe('investigador de arquivos', () => {
     pe.set([0x50, 0x45, 0, 0, 0x64, 0x86], 0x80)
     const disguised = await inspectFile({ name: 'foto.jpg', bytes: pe })
     expect(disguised.checks.find((check) => check.label === 'Tipo real')?.detail).toMatch(/Executável/)
-    expect(disguised.tone).toBe('bad')
+    expect(level(disguised)).toBe('bad')
     const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
     expect((await inspectFile({ name: 'logo.svg', bytes: svg })).checks.find((check) => check.label === 'Conteúdo ativo')?.tone).toBe('bad')
   })
@@ -81,7 +84,7 @@ describe('validadores por categoria', () => {
     const [pix] = run('pix', { qtd: 1, payload: true }, 'payload')
     const [line] = run('boleto', { qtd: 1 }, 'linha')
     const ok = validateFinance([card, pix, line].join('\n'), 'Detectar', DAY)
-    expect(ok.verdicts.map((item) => item.tone).every((tone) => tone !== 'bad')).toBe(true)
+    expect(ok.verdicts.map(level).every((tone) => tone !== 'bad')).toBe(true)
     const brokenPix = pix.slice(0, -1) + (pix.endsWith('0') ? '1' : '0')
     const brokenLine = line.replace(/\d/, (digit) => String((Number(digit) + 1) % 10))
     expect(tones(validateFinance(['4111 1111 1111 1112', brokenPix, brokenLine].join('\n'), 'Detectar', DAY))).toEqual(['bad', 'bad', 'bad'])
@@ -97,14 +100,16 @@ describe('validadores por categoria', () => {
 
   it('coordenadas: acha a inversão e a área com limites trocados', () => {
     const result = validateCoords(['-23.5505, -46.6333', '-46.6333, -23.5505', '91, 10', '-23.8, -46.9 → -23.3, -46.3', '-23.3, -46.3 → -23.8, -46.9'].join('\n'), { regiao: 'Brasil', latMin: 0, latMax: 0, lngMin: 0, lngMax: 0 })
-    expect(tones(result)).toEqual(['ok', 'bad', 'bad', 'ok', 'bad'])
+    // Coordenada não tem cálculo: a aba mostra propriedades, sem veredito.
+    expect(result.verdicts.every((item) => item.calc === undefined && item.checks.length > 0)).toBe(true)
+    expect(result.verdicts[2].checks.find((check) => check.label === 'Latitude')?.detail).toMatch(/91/)
     expect(result.verdicts[1].checks.find((check) => check.label === 'Região')?.detail).toMatch(/invertidas/)
   })
 
   it('estruturados: aponta a linha do erro', () => {
     expect(tones(validateStructured('{"a": 1}', 'Detectar'))).toEqual(['ok'])
     const json = validateStructured('{\n  "a": 1,\n}', 'Detectar')
-    expect(json.verdicts[0].tone).toBe('bad')
+    expect(level(json.verdicts[0])).toBe('bad')
     const xml = validateStructured('<a><b></a>', 'XML')
     expect(xml.verdicts[0].checks.at(-1)?.detail).toMatch(/fecha <b>/)
     expect(tones(validateStructured('id,nome\n1,Ana\n2', 'CSV'))).toEqual(['bad'])
@@ -124,7 +129,7 @@ describe('validadores por categoria', () => {
   it('perfil de massa', () => {
     const cpf = cpfD(rng(2), 'SP').join('')
     const result = profileDataset(['id,cpf,email', `1,${cpf},a@x.com`, `1,123.456.789-00,b@x`].join('\n'))
-    const byColumn = Object.fromEntries(result.verdicts.map((item) => [item.input, item.tone]))
+    const byColumn = Object.fromEntries(result.verdicts.map((item) => [item.input, level(item)]))
     expect(byColumn).toMatchObject({ id: 'bad', cpf: 'bad', email: 'bad' })
   })
 
@@ -134,7 +139,9 @@ describe('validadores por categoria', () => {
       const outcome = await spec.run({ text: sample.text ?? '', files: sample.files ?? [] }, { ...spec.defaults }, DAY)
       expect([id, outcome.error ?? '']).toEqual([id, ''])
       expect(outcome.verdicts.length).toBeGreaterThan(0)
-      if (id !== 'textos') expect([id, outcome.verdicts.some((item) => item.tone === 'bad')]).toEqual([id, true])
+      // Cada valor vira uma ficha de propriedades; válido/inválido só aparece onde há cálculo.
+      expect([id, outcome.verdicts.every((item) => item.checks.length > 0)]).toEqual([id, true])
+      for (const item of outcome.verdicts) if (item.calc === 'Válido' || item.calc === 'Inválido') expect(item.checks.some((check) => check.calc)).toBe(true)
     }
   }, 120000)
 })

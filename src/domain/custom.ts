@@ -5,8 +5,11 @@ export const COLUMN_TYPES = [
   'Nome completo', 'Nome', 'Sobrenome', 'CPF', 'CNPJ', 'E-mail', 'Telefone', 'CEP', 'Endereço',
   'Cidade', 'UF', 'Data de nascimento', 'Idade', 'Data', 'Data e hora', 'Número inteiro', 'Decimal',
   'Valor monetário', 'Porcentagem', 'Cor', 'Comprimento', 'Massa', 'Volume', 'Coordenada', 'Booleano', 'Status',
-  'Texto curto', 'Descrição', 'Código (AAA-9999)', 'SKU', 'Cartão', 'Chave PIX', 'Conta bancária', 'UUID',
+  'Texto curto', 'Descrição', 'Código (AAA-9999)', 'SKU', 'Cartão', 'Chave PIX', 'Conta bancária', 'UUID', 'Lista de opções',
+  'Cópia de outra coluna',
 ] as const
+
+export const DATE_TYPES = ['Data', 'Data de nascimento', 'Data e hora']
 
 export type ColumnRule = 'Válido' | 'Inválido' | 'Misto'
 export type ColumnExtra = {
@@ -17,6 +20,12 @@ export type ColumnExtra = {
   max?: number
   colorFormat?: string
   alpha?: number
+  options?: string[]
+  maxLength?: number
+  /** Cópia de outra coluna: id da coluna copiada (senha → confirmação). */
+  ref?: string
+  /** Data / Data e hora: id da coluna de data que esta precisa seguir (início → fim). */
+  after?: string
 }
 export type CustomColumn = { id: string; name: string; type: string; rule: ColumnRule; extra?: ColumnExtra }
 export type CustomRow = { values: Record<string, string>; checks: Record<string, 'passa' | 'falha'> }
@@ -39,7 +48,97 @@ export function validateCustom(columns: CustomColumn[], count: number) {
     const extraError = extraErrorFor(column, name)
     if (extraError) return extraError
   }
+  return dependencyError(columns)
+}
+
+/** Coluna de que esta depende, quando o vínculo vale para o tipo dela. */
+export function dependencyOf(column: CustomColumn) {
+  if (column.type === 'Cópia de outra coluna') return column.extra?.ref
+  if ((column.type === 'Data' || column.type === 'Data e hora') && column.extra?.after) return column.extra.after
+  return undefined
+}
+
+function dependencyError(columns: CustomColumn[]) {
+  const byId = new Map(columns.map((column) => [column.id, column]))
+  for (const column of columns) {
+    const name = column.name.trim()
+    if (column.type === 'Cópia de outra coluna' && !column.extra?.ref) return `Escolha a coluna que "${name}" copia.`
+    const ref = dependencyOf(column)
+    if (!ref) continue
+    const target = byId.get(ref)
+    if (!target) return `A coluna que "${name}" segue não existe mais.`
+    if (target.id === column.id) return `"${name}" não pode depender de si mesma.`
+    if (column.extra?.after && column.type !== 'Cópia de outra coluna' && !DATE_TYPES.includes(target.type)) {
+      return `"${name}" só pode vir depois de uma coluna de data; "${target.name}" é ${target.type.toLowerCase()}.`
+    }
+  }
+  try {
+    dependencyOrder(columns)
+  } catch (error) {
+    return (error as Error).message
+  }
   return null
+}
+
+/** Ordem de geração: cada coluna depois daquela de que depende. Lança erro em ciclo. */
+export function dependencyOrder(columns: CustomColumn[]) {
+  const byId = new Map(columns.map((column) => [column.id, column]))
+  const state = new Map<string, 'visiting' | 'done'>()
+  const order: CustomColumn[] = []
+  const visit = (column: CustomColumn, path: string[]) => {
+    if (state.get(column.id) === 'done') return
+    if (state.get(column.id) === 'visiting') {
+      throw new Error(`Dependência circular: ${[...path, column.name].join(' → ')}. Desfaça um dos vínculos.`)
+    }
+    state.set(column.id, 'visiting')
+    const ref = dependencyOf(column)
+    const target = ref ? byId.get(ref) : undefined
+    if (target) visit(target, [...path, column.name])
+    state.set(column.id, 'done')
+    order.push(column)
+  }
+  for (const column of columns) visit(column, [])
+  return order
+}
+
+function parseDateCell(text: string) {
+  let match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text)
+  if (match) {
+    const date = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]), 12)
+    return date.getDate() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 ? date : null
+  }
+  match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(text)
+  if (match) {
+    const [, y, m, d, h, min, sec] = match.map(Number)
+    const date = new Date(y, m - 1, d, h, min, sec)
+    return date.getDate() === d && date.getMonth() === m - 1 && date.getHours() === h && min < 60 && sec < 60 ? date : null
+  }
+  return null
+}
+
+function formatDateCell(type: string, date: Date) {
+  const day = `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`
+  if (type !== 'Data e hora') return day
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}-03:00`
+}
+
+function dependentCell(column: CustomColumn, source: string, random: () => number, index: number) {
+  const bad = column.rule === 'Inválido' || (column.rule === 'Misto' && random() < 0.5)
+  if (column.type === 'Cópia de outra coluna') {
+    if (!bad) return { text: source, bad: false }
+    return index % 2 === 0 || !source ? { text: `${source}x`, bad: true } : { text: '', bad: true }
+  }
+  const start = parseDateCell(source)
+  if (!start) return null // a coluna de origem saiu inválida: esta segue a própria regra
+  const date = new Date(start)
+  if (!bad) {
+    date.setDate(date.getDate() + int(random, 0, 365))
+    if (column.type === 'Data e hora') date.setHours(int(random, 0, 23), int(random, 0, 59), int(random, 0, 59))
+    if (date < start) date.setTime(start.getTime())
+  } else {
+    date.setDate(date.getDate() - int(random, 1, 365))
+  }
+  return { text: formatDateCell(column.type, date), bad }
 }
 
 function extraErrorFor(column: CustomColumn, name: string) {
@@ -57,7 +156,20 @@ function extraErrorFor(column: CustomColumn, name: string) {
     const alpha = column.extra.alpha ?? 100
     if (!Number.isFinite(alpha) || alpha < 0 || alpha > 100) return `O alfa de "${name}" precisa estar entre 0 e 100.`
   }
-  if (isMeasure(column.type)) {
+  if (column.type === 'Lista de opções') {
+    const options = (column.extra?.options ?? []).filter((option) => option.trim())
+    if (options.length === 0) return `A lista de opções de "${name}" está vazia.`
+  }
+  if (column.type === 'Texto curto' && column.extra?.maxLength !== undefined) {
+    const length = column.extra.maxLength
+    if (!Number.isInteger(length) || length < 1 || length > 10000) return `O tamanho máximo de "${name}" precisa ser um inteiro de 1 a 10000.`
+  }
+  if (column.type === 'Número inteiro') {
+    for (const [label, value] of [['mínimo', column.extra?.min], ['máximo', column.extra?.max]] as const) {
+      if (value !== undefined && !Number.isInteger(value)) return `O ${label} de "${name}" precisa ser um número inteiro.`
+    }
+  }
+  if (isMeasure(column.type) || column.type === 'Número inteiro') {
     const min = column.extra?.min
     const max = column.extra?.max
     if (min !== undefined && !Number.isFinite(min)) return `O mínimo de "${name}" precisa ser um número.`
@@ -76,6 +188,7 @@ export function defaultExtra(type: string): ColumnExtra | undefined {
   if (type === 'Comprimento') return { unit: 'cm', min: 1, max: 100 }
   if (type === 'Volume') return { unit: 'ml', min: 1, max: 1000 }
   if (type === 'Cor') return { colorFormat: 'HEX', alpha: 100 }
+  if (type === 'Lista de opções') return { options: ['Opção A', 'Opção B'] }
   return undefined
 }
 
@@ -161,12 +274,21 @@ export function generateCustom(options: {
     && options.columns.some((column) => column.type === 'Idade' && column.rule === 'Válido')
   const records: CustomRow[] = []
   const seenSku: string[] = []
+  const order = dependencyOrder(options.columns)
+  const nameOf = new Map(options.columns.map((column) => [column.id, column.name]))
   for (let index = 0; index < options.count; index += 1) {
     const individual = person(random, {})
     const birth = birthFor(random, options.referenceDate)
     const values: Record<string, string> = {}
     const checks: Record<string, 'passa' | 'falha'> = {}
-    for (const column of options.columns) {
+    for (const column of order) {
+      const ref = dependencyOf(column)
+      const dependent = ref ? dependentCell(column, values[nameOf.get(ref) ?? ''] ?? '', random, index) : null
+      if (dependent) {
+        values[column.name] = dependent.text
+        checks[column.name] = dependent.bad ? 'falha' : 'passa'
+        continue
+      }
       const linked = options.consistent
         ? consistentCell(column, random, individual, birth, linkBirth)
         : null
@@ -215,6 +337,25 @@ function specialCell(column: CustomColumn, random: () => number, index: number, 
     return index % 2 === 0
       ? { text: '', bad: true }
       : { text: descriptionValue(random, 'Extensa').repeat(6), bad: true }
+  }
+  if (column.type === 'Lista de opções') {
+    const options = (column.extra?.options ?? []).filter((option) => option.trim())
+    if (!bad) return { text: options[Math.floor(random() * options.length)] ?? '', bad: false }
+    return index % 2 === 0 ? { text: '', bad: true } : { text: 'Opção fora da lista', bad: true }
+  }
+  if (column.type === 'Texto curto' && column.extra?.maxLength !== undefined) {
+    const limit = column.extra.maxLength
+    if (!bad) return { text: String(ctVal('Texto curto', 'Válido', random, person(random, {})).t).slice(0, limit), bad: false }
+    return index % 2 === 0 ? { text: '', bad: true } : { text: 'x'.repeat(limit + 1), bad: true }
+  }
+  if (column.type === 'Número inteiro' && (column.extra?.min !== undefined || column.extra?.max !== undefined)) {
+    const min = column.extra?.min ?? Math.min(1, column.extra?.max ?? 1)
+    const max = column.extra?.max ?? Math.max(1000, min)
+    if (!bad) return { text: String(int(random, min, max)), bad: false }
+    const mode = index % 3
+    if (mode === 0) return { text: '', bad: true }
+    if (mode === 1) return { text: 'abc', bad: true }
+    return { text: String(column.extra?.max !== undefined ? max + 1 : min - 1), bad: true }
   }
   if (column.type === 'Cor') {
     const format = column.extra?.colorFormat ?? 'HEX'

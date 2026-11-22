@@ -40,7 +40,7 @@ function cpfChecks(value: string): Check[] {
   const checks: Check[] = []
   if (/[^\d.\-\s]/.test(value)) checks.push(bad('Caracteres', 'Tem caracteres além de dígitos, ponto e hífen.'))
   if (digits.length !== 11) return [...checks, bad('Tamanho', `${digits.length} dígitos; o CPF tem 11.`)]
-  checks.push(masked || /^\d{11}$/.test(value) ? ok('Formato', masked ? 'Com máscara 000.000.000-00.' : 'Só dígitos, sem máscara.') : warn('Formato', 'Máscara fora do padrão 000.000.000-00.'))
+  checks.push(masked || /^\d{11}$/.test(value) ? ok('Formato', masked ? 'Com máscara 000.000.000-00.' : 'Só dígitos, sem máscara.') : warn('Formato', 'Máscara diferente de 000.000.000-00.'))
   if (/^(\d)\1{10}$/.test(digits)) return [...checks, bad('Sequência', 'Todos os dígitos iguais: passa no cálculo, mas a Receita não emite.')]
   checks.push(cpfValid(digits) ? ok('Dígitos verificadores', `Conferem (${digits.slice(9)}).`) : bad('Dígitos verificadores', 'Não conferem com os 9 primeiros dígitos.'))
   checks.push(ok('Região fiscal', `9º dígito ${digits[8]}: ${FISCAL[digits[8]]}.`))
@@ -51,7 +51,7 @@ function cnpjChecks(value: string): Check[] {
   const clean = value.replace(/[./-\s]/g, '').toUpperCase()
   const checks: Check[] = []
   if (clean.length !== 14) return [bad('Tamanho', `${clean.length} caracteres; o CNPJ tem 14.`)]
-  if (!/^[0-9A-Z]{12}\d{2}$/.test(clean)) return [bad('Formato', 'Os 12 primeiros precisam ser letras maiúsculas ou dígitos e os 2 últimos, dígitos.')]
+  if (!/^[0-9A-Z]{12}\d{2}$/.test(clean)) return [bad('Formato', 'Composição diferente de 12 letras maiúsculas ou dígitos seguidos de 2 dígitos.')]
   checks.push(/[A-Z]/.test(clean) ? ok('Formato', 'CNPJ alfanumérico (padrão da Receita a partir de julho de 2026).') : ok('Formato', 'CNPJ numérico.'))
   if (/^(.)\1{13}$/.test(clean)) return [...checks, bad('Sequência', 'Todos os caracteres iguais.')]
   checks.push(cnpjValid(clean) ? ok('Dígitos verificadores', `Conferem (${clean.slice(12)}).`) : bad('Dígitos verificadores', 'Não conferem.'))
@@ -93,8 +93,8 @@ function phoneChecks(value: string): Check[] {
   const ddd = Number(digits.slice(0, 2))
   checks.push(DDD[ddd] ? ok('DDD', `${ddd} · ${DDD[ddd]}.`) : bad('DDD', `${ddd} não é um DDD em uso no Brasil.`))
   const number = digits.slice(2)
-  if (number.length === 9) checks.push(number.startsWith('9') ? ok('Tipo', 'Celular (9 dígitos começando com 9).') : bad('Tipo', 'Com 9 dígitos, precisa começar com 9 (celular).'))
-  else checks.push(/^[2-5]/.test(number) ? ok('Tipo', 'Fixo (8 dígitos começando de 2 a 5).') : /^[6-9]/.test(number) ? bad('Tipo', 'Com 8 dígitos começando com 6 a 9, falta o 9 do celular.') : bad('Tipo', 'Fixo precisa começar de 2 a 5.'))
+  if (number.length === 9) checks.push(number.startsWith('9') ? ok('Tipo', 'Celular (9 dígitos começando com 9).') : bad('Tipo', `9 dígitos começando com ${number[0]} (celulares começam com 9).`))
+  else checks.push(/^[2-5]/.test(number) ? ok('Tipo', 'Fixo (8 dígitos começando de 2 a 5).') : /^[6-9]/.test(number) ? bad('Tipo', `8 dígitos começando com ${number[0]} (faixa de celular, sem o 9 inicial).`) : bad('Tipo', `8 dígitos começando com ${number[0]} (fixos começam de 2 a 5).`))
   if (/^(\d)\1+$/.test(number)) checks.push(bad('Sequência', 'Número com todos os dígitos iguais.'))
   return checks
 }
@@ -103,7 +103,7 @@ function cepChecks(value: string): Check[] {
   const digits = value.replace(/\D/g, '')
   if (/[^\d.\-\s]/.test(value)) return [bad('Caracteres', 'Tem caracteres além de dígitos e hífen.')]
   if (digits.length !== 8) return [bad('Tamanho', `${digits.length} dígitos; o CEP tem 8.`)]
-  const checks = [/^\d{5}-\d{3}$/.test(value) ? ok('Formato', '00000-000.') : /^\d{8}$/.test(value) ? ok('Formato', 'Só dígitos.') : warn('Formato', 'Máscara fora do padrão 00000-000.')]
+  const checks = [/^\d{5}-\d{3}$/.test(value) ? ok('Formato', '00000-000.') : /^\d{8}$/.test(value) ? ok('Formato', 'Só dígitos.') : warn('Formato', 'Máscara diferente de 00000-000.')]
   if (/^0{5}/.test(digits) || /^(\d)\1{7}$/.test(digits)) checks.push(bad('Faixa', 'Faixa que os Correios não usam.'))
   else checks.push(ok('Região', `Começa com ${digits[0]}: ${CEP_REGION[Number(digits[0])]}.`))
   checks.push(warn('Existência', 'A faixa confere, mas só a base dos Correios diz se o logradouro existe.'))
@@ -173,7 +173,7 @@ export function validatePeople(text: string, tipo: string, day: Date): Outcome {
   return {
     verdicts: items.map((item) => {
       const kind = tipo === 'Detectar' ? detectPerson(item) : tipo
-      const checks: Check[] = tipo === 'Detectar' ? [ok('Tipo', `Detectado como ${kind}.`)] : []
+      const checks: Check[] = tipo === 'Detectar' ? [ok('Reconhecido como', kind)] : []
       checks.push(...(kind === 'CPF' ? cpfChecks(item) : kind === 'CNPJ' ? cnpjChecks(item) : kind === 'E-mail' ? emailChecks(item) : kind === 'Telefone' ? phoneChecks(item) : kind === 'CEP' ? cepChecks(item) : kind === 'Nascimento' ? birthChecks(item, day) : nameChecks(item)))
       const normal = `${kind}:${['CPF', 'CNPJ', 'Telefone', 'CEP'].includes(kind) ? item.replace(/\W/g, '').toUpperCase() : item.toLowerCase()}`
       const before = seen.get(normal) ?? 0

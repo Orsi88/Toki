@@ -1,17 +1,42 @@
-import { useState } from 'react'
-import { COLUMN_TYPES, customToCsv, customToJson, defaultExtra, generateCustom, productColumns, validateCustom, type ColumnExtra, type ColumnRule, type CustomColumn, type CustomRow } from '../domain/custom.ts'
+import { useDeferredValue, useMemo, useState } from 'react'
+import { decodeCapture, parseCapture, type CaptureImport } from '../domain/capture.ts'
+import { COLUMN_TYPES, DATE_TYPES, customToCsv, customToJson, defaultExtra, generateCustom, productColumns, validateCustom, type ColumnExtra, type ColumnRule, type CustomColumn, type CustomRow } from '../domain/custom.ts'
 import { isMeasure, parseColor, unitsFor } from '../domain/values.ts'
 import { copyText, downloadNotice, downloadText, type Notice } from '../ui/browser.ts'
 import { CopyButton } from '../ui/CopyButton.tsx'
+import { IconButton } from '../ui/IconButton.tsx'
 import { Switch } from '../ui/Fields.tsx'
 import { ClearButton } from '../ui/ClearButton.tsx'
 import { VaryButton } from '../ui/VaryButton.tsx'
 
 const RULES: ColumnRule[] = ['Válido', 'Inválido', 'Misto']
 
-function ColumnExtraFields({ column, onChange }: { column: CustomColumn; onChange: (extra: ColumnExtra) => void }) {
+function ColumnExtraFields({ column, columns, onChange }: { column: CustomColumn; columns: CustomColumn[]; onChange: (extra: ColumnExtra) => void }) {
   const extra = column.extra ?? {}
   const set = (patch: ColumnExtra) => onChange({ ...extra, ...patch })
+  const others = columns.filter((item) => item.id !== column.id)
+  if (column.type === 'Cópia de outra coluna') {
+    return (
+      <label className="field">
+        <span>Copia a coluna</span>
+        <select aria-label="Coluna copiada" value={extra.ref ?? ''} onChange={(event) => set({ ref: event.target.value || undefined })}>
+          <option value="">Escolha…</option>
+          {others.map((item) => <option key={item.id} value={item.id}>{item.name || '(sem nome)'}</option>)}
+        </select>
+      </label>
+    )
+  }
+  if (column.type === 'Data' || column.type === 'Data e hora') {
+    return (
+      <label className="field">
+        <span>Depois de (opcional)</span>
+        <select aria-label="Data anterior" value={extra.after ?? ''} onChange={(event) => set({ after: event.target.value || undefined })}>
+          <option value="">Sem vínculo</option>
+          {others.filter((item) => DATE_TYPES.includes(item.type)).map((item) => <option key={item.id} value={item.id}>{item.name || '(sem nome)'}</option>)}
+        </select>
+      </label>
+    )
+  }
   if (column.type === 'SKU') {
     return (
       <label className="field">
@@ -48,6 +73,36 @@ function ColumnExtraFields({ column, onChange }: { column: CustomColumn; onChang
       </>
     )
   }
+  if (column.type === 'Lista de opções') {
+    return (
+      <label className="field">
+        <span>Opções (uma por linha)</span>
+        <textarea aria-label="Opções" rows={3} value={(extra.options ?? []).join('\n')} onChange={(event) => set({ options: event.target.value.split('\n') })} />
+      </label>
+    )
+  }
+  if (column.type === 'Texto curto') {
+    return (
+      <label className="field">
+        <span>Tamanho máximo (opcional)</span>
+        <input type="number" aria-label="Tamanho máximo" value={extra.maxLength ?? ''} onChange={(event) => set({ maxLength: event.target.value === '' ? undefined : Number(event.target.value) })} />
+      </label>
+    )
+  }
+  if (column.type === 'Número inteiro') {
+    return (
+      <>
+        <label className="field">
+          <span>Mínimo (opcional)</span>
+          <input type="number" aria-label="Mínimo" value={extra.min ?? ''} onChange={(event) => set({ min: event.target.value === '' ? undefined : Number(event.target.value) })} />
+        </label>
+        <label className="field">
+          <span>Máximo (opcional)</span>
+          <input type="number" aria-label="Máximo" value={extra.max ?? ''} onChange={(event) => set({ max: event.target.value === '' ? undefined : Number(event.target.value) })} />
+        </label>
+      </>
+    )
+  }
   if (!isMeasure(column.type)) return null
   const units = unitsFor(column.type)
   return (
@@ -75,7 +130,28 @@ function todayInput() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
-export function CustomPage({ onToast }: { onToast: (message: string | Notice, bad?: boolean) => void }) {
+function readCapture(param: string | null): CaptureImport | { error: string } | null {
+  if (!param) return null
+  try {
+    return parseCapture(decodeCapture(param))
+  } catch {
+    return { error: 'Não foi possível ler a captura recebida. Envie de novo pela extensão.' }
+  }
+}
+
+function forgetCapture() {
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/massa`)
+}
+
+export function CustomPage({ query, onToast }: { query?: URLSearchParams; onToast: (message: string | Notice, bad?: boolean) => void }) {
+  const captureParam = query?.get('captura') ?? null
+  const [incoming, setIncoming] = useState(() => readCapture(captureParam))
+  const [seenParam, setSeenParam] = useState(captureParam)
+  if (seenParam !== captureParam) {
+    // Nova captura chegando com a aba já aberta: mostra a revisão sem mexer nas colunas atuais.
+    setSeenParam(captureParam)
+    setIncoming(readCapture(captureParam))
+  }
   const [columns, setColumns] = useState<CustomColumn[]>([
     { id: 'c1', name: 'nome', type: 'Nome completo', rule: 'Válido' },
     { id: 'c2', name: 'cpf', type: 'CPF', rule: 'Válido' },
@@ -84,23 +160,24 @@ export function CustomPage({ onToast }: { onToast: (message: string | Notice, ba
   const [count, setCount] = useState(10)
   const [consistent, setConsistent] = useState(true)
   const [reference, setReference] = useState(todayInput)
-  const [records, setRecords] = useState<CustomRow[] | null>(null)
+  const [seed, setSeed] = useState(() => Math.floor(Math.random() * 1_000_000_000))
   const error = validateCustom(columns, count)
+  // A prévia acompanha cada mudança, como nos geradores; os dadinhos só trocam a seed.
+  const inputs = useMemo(() => ({ columns, count, reference, consistent, seed }), [columns, count, reference, consistent, seed])
+  const settled = useDeferredValue(inputs)
+  const records = useMemo<CustomRow[] | null>(() => {
+    if (validateCustom(settled.columns, settled.count)) return null
+    return generateCustom({
+      columns: settled.columns,
+      count: settled.count,
+      seed: settled.seed,
+      referenceDate: new Date(`${settled.reference}T12:00:00`),
+      consistent: settled.consistent,
+    })
+  }, [settled])
 
   function roll() {
-    if (error) return
-    setRecords(generateCustom({
-      columns,
-      count,
-      seed: Math.floor(Math.random() * 1_000_000_000),
-      referenceDate: new Date(`${reference}T12:00:00`),
-      consistent,
-    }))
-  }
-
-  function generate() {
-    roll()
-    if (!error) onToast({ title: 'Lote pronto', detail: 'CSV e JSON usam estes mesmos valores.' })
+    setSeed(Math.floor(Math.random() * 1_000_000_000))
   }
 
   function reset() {
@@ -112,18 +189,130 @@ export function CustomPage({ onToast }: { onToast: (message: string | Notice, ba
     setCount(10)
     setConsistent(true)
     setReference(todayInput())
-    setRecords(null)
     onToast('Configurações e prévia limpas.')
   }
 
   const preview = records?.slice(0, 10) ?? []
 
+  function applyCapture(mode: 'replace' | 'append') {
+    if (!incoming || 'error' in incoming) return
+    if (mode === 'replace') {
+      setColumns(incoming.columns)
+      onToast({ title: 'Captura importada', detail: `${incoming.columns.length} colunas de "${incoming.formName}". Confira e gere o lote.` })
+    } else {
+      const taken = new Set(columns.map((column) => column.name.trim().toLocaleLowerCase('pt-BR')))
+      const fresh = incoming.columns.filter((column) => !taken.has(column.name.toLocaleLowerCase('pt-BR')))
+      setColumns((list) => [...list, ...fresh])
+      const skipped = incoming.columns.length - fresh.length
+      onToast({ title: 'Captura acrescentada', detail: `${fresh.length} colunas novas${skipped ? `; ${skipped} já existiam e ficaram como estavam` : ''}.` })
+    }
+    setIncoming(null)
+    forgetCapture()
+  }
+
+  function discardCapture() {
+    setIncoming(null)
+    forgetCapture()
+    onToast('Captura descartada; nada foi alterado.')
+  }
+
   return (
     <div className="work">
       <ClearButton onClick={reset} />
+      {incoming && 'error' in incoming ? (
+        <section className="banner bad" role="alert">
+          <p>{incoming.error}</p>
+          <button type="button" className="ghost" onClick={discardCapture}>Fechar</button>
+        </section>
+      ) : null}
+      {incoming && !('error' in incoming) ? (
+        <section className="panel capture-review" aria-labelledby="capture-title">
+          <header className="preview-head">
+            <h2 id="capture-title">Captura recebida: {incoming.formName}</h2>
+          </header>
+          <p className="muted">A extensão mandou só a estrutura do formulário ({incoming.columns.length} campos), sem os valores preenchidos. Nada muda até você escolher.</p>
+          <ul className="capture-list">
+            {incoming.columns.map((column) => {
+              const notes = incoming.notes.filter((note) => note.column === column.name)
+              return (
+                <li key={column.id}>
+                  <div className="capture-row">
+                    <b>{column.name}</b>
+                    <span>{column.type}{column.extra?.options ? ` · ${column.extra.options.length} opções` : ''}</span>
+                  </div>
+                  {notes.map((note, index) => <p key={index}>{note.text}</p>)}
+                </li>
+              )
+            })}
+          </ul>
+          <div className="row-actions">
+            <button type="button" className="primary" onClick={() => applyCapture('replace')}>Substituir as colunas atuais</button>
+            <button type="button" onClick={() => applyCapture('append')}>Acrescentar às colunas atuais</button>
+            <button type="button" className="ghost" onClick={discardCapture}>Descartar</button>
+          </div>
+        </section>
+      ) : null}
+      <section className="panel" id="resultado">
+        <header className="preview-head">
+          <h2>Prévia</h2>
+          <VaryButton disabled={Boolean(error)} onClick={roll} />
+        </header>
+        {!records ? <p className="muted">Ajuste as colunas abaixo; a prévia aparece aqui.</p> : <p className="muted">Mostrando {preview.length} de {records.length}.</p>}
+        {records && (
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table>
+                <thead>
+                  <tr>
+                    {columns.map((column) => <th key={column.id}>{column.name}</th>)}
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.map((row, index) => (
+                    <tr key={index}>
+                      {columns.map((column) => {
+                        const value = row.values[column.name] ?? ''
+                        return (
+                          <td key={column.id}>
+                            <span className="cell">
+                              <button type="button" className="cell-hit" title="Clique para copiar" onClick={() => copyText(value).then((ok) => onToast(ok ? 'Copiado.' : 'Não foi possível copiar.', !ok))}>
+                                {parseColor(value) ? <i className="swatch" style={{ background: value }} /> : null}
+                                {value || '(vazio)'}
+                              </button>
+                              {row.checks[column.name] === 'falha' ? <span className="tone bad">falha</span> : null}
+                              <CopyButton label={`Copiar ${column.name}`} onCopy={async () => { const ok = await copyText(value); onToast(ok ? 'Copiado.' : 'Não foi possível copiar.', !ok) }} />
+                            </span>
+                          </td>
+                        )
+                      })}
+                      <td>
+                        <CopyButton
+                          label={`Copiar linha ${index + 1}`}
+                          onCopy={async () => {
+                            const ok = await copyText(columns.map((column) => row.values[column.name] ?? '').join('\t'))
+                            onToast(ok ? 'Linha copiada.' : 'Não foi possível copiar.', !ok)
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="lote-actions">
+              <IconButton icon="copy" tip="Copiar o lote em CSV" badge="CSV" onClick={async () => {
+                const ok = await copyText(customToCsv(columns, records).replace(/^\uFEFF/, ''))
+                onToast(ok ? 'CSV copiado.' : 'Não foi possível copiar.', !ok)
+              }} />
+              <IconButton icon="download" tip="Baixar CSV" badge="CSV" onClick={() => { downloadText('massa.csv', customToCsv(columns, records), 'text/csv;charset=utf-8'); onToast(downloadNotice()) }} />
+              <IconButton icon="download" tip="Baixar JSON" badge="JSON" onClick={() => { downloadText('massa.json', customToJson(columns, records), 'application/json'); onToast(downloadNotice()) }} />
+            </div>
+          </>
+        )}
+      </section>
       <section className="step">
         <header className="step-title">
-          <b>1</b>
           <div>
             <h2>Defina as colunas</h2>
             <p>Nome, tipo e regra de cada coluna do lote.</p>
@@ -172,17 +361,16 @@ export function CustomPage({ onToast }: { onToast: (message: string | Notice, ba
                     {RULES.map((rule) => <option key={rule}>{rule}</option>)}
                   </select>
                 </label>
-                <ColumnExtraFields column={column} onChange={(extra) => setColumns((list) => list.map((item) => item.id === column.id ? { ...item, extra } : item))} />
+                <ColumnExtraFields column={column} columns={columns} onChange={(extra) => setColumns((list) => list.map((item) => item.id === column.id ? { ...item, extra } : item))} />
               </div>
             </article>
           ))}
         </div>
         <button type="button" className="ghost" onClick={() => setColumns((list) => [...list, { id: `c${Date.now()}`, name: `coluna_${list.length + 1}`, type: 'Texto curto', rule: 'Válido' }])}>Adicionar coluna</button>
-        <button type="button" className="ghost" onClick={() => { setColumns(productColumns()); setRecords(null) }}>Usar preset Produtos</button>
+        <button type="button" className="ghost" onClick={() => { setColumns(productColumns())}}>Usar preset Produtos</button>
       </section>
       <section className="step">
         <header className="step-title">
-          <b>2</b>
           <div>
             <h2>Defina a geração do lote</h2>
             <p>Quantidade, data de referência e se os dados da mesma linha saem da mesma pessoa.</p>
@@ -201,68 +389,8 @@ export function CustomPage({ onToast }: { onToast: (message: string | Notice, ba
             <Switch checked={consistent} label="Consistência" onChange={setConsistent} />
           </label>
         </div>
-        <p className="muted">Misto sorteia cerca de metade das células como inválidas. Com consistência, nome, endereço, CPF e, quando os dois existem, idade e nascimento saem da mesma pessoa.</p>
+        <p className="muted">Misto sorteia cerca de metade das células como inválidas. Com consistência, nome, endereço, CPF e, quando os dois existem, idade e nascimento saem da mesma pessoa. Cópias repetem a coluna escolhida e datas com vínculo saem depois da data de origem; se a origem sair inválida, a dependente segue a própria regra.</p>
         {error ? <p className="banner bad">{error}</p> : null}
-        <button id="mf-generate" className="primary" type="button" disabled={Boolean(error)} onClick={generate}>Gerar lote</button>
-      </section>
-      <section className="panel" id="resultado">
-        <header className="preview-head">
-          <h2>Prévia</h2>
-          <VaryButton disabled={Boolean(error)} onClick={roll} />
-        </header>
-        {!records ? <p className="muted">Gere o lote para ver as 10 primeiras linhas e exportar todas.</p> : <p className="muted">Mostrando {preview.length} de {records.length}.</p>}
-        {records && (
-          <>
-            <div style={{ overflowX: 'auto' }}>
-              <table>
-                <thead>
-                  <tr>
-                    {columns.map((column) => <th key={column.id}>{column.name}</th>)}
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.map((row, index) => (
-                    <tr key={index}>
-                      {columns.map((column) => {
-                        const value = row.values[column.name] ?? ''
-                        return (
-                          <td key={column.id}>
-                            <span className="cell">
-                              <button type="button" className="cell-hit" title="Clique para copiar" onClick={() => copyText(value).then((ok) => onToast(ok ? 'Copiado.' : 'Não foi possível copiar.', !ok))}>
-                                {parseColor(value) ? <i className="swatch" style={{ background: value }} /> : null}
-                                {value || '(vazio)'}
-                              </button>
-                              {row.checks[column.name] === 'falha' ? <span className="tone bad">falha</span> : null}
-                              <CopyButton label={`Copiar ${column.name}`} onCopy={async () => { const ok = await copyText(value); onToast(ok ? 'Copiado.' : 'Não foi possível copiar.', !ok) }} />
-                            </span>
-                          </td>
-                        )
-                      })}
-                      <td>
-                        <CopyButton
-                          label={`Copiar linha ${index + 1}`}
-                          onCopy={async () => {
-                            const ok = await copyText(columns.map((column) => row.values[column.name] ?? '').join('\t'))
-                            onToast(ok ? 'Linha copiada.' : 'Não foi possível copiar.', !ok)
-                          }}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="row-actions">
-              <button type="button" onClick={async () => {
-                const ok = await copyText(customToCsv(columns, records).replace(/^\uFEFF/, ''))
-                onToast(ok ? 'CSV copiado.' : 'Não foi possível copiar.', !ok)
-              }}>Copiar CSV</button>
-              <button type="button" onClick={() => { downloadText('massa.csv', customToCsv(columns, records), 'text/csv;charset=utf-8'); onToast(downloadNotice()) }}>Baixar CSV</button>
-              <button type="button" onClick={() => { downloadText('massa.json', customToJson(columns, records), 'application/json'); onToast(downloadNotice()) }}>Baixar JSON</button>
-            </div>
-          </>
-        )}
       </section>
     </div>
   )

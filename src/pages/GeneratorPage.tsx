@@ -1,16 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { recordsToCsv, recordsToJson, splitDiagnostics, type GeneratedItem } from '../domain/export.ts'
 import { ENG, genStruct, genText, key, rng, setReferenceDate } from '../domain/mfEngine.ts'
 import { copyText, downloadNotice, downloadText, type Notice } from '../ui/browser.ts'
-import { CopyButton } from '../ui/CopyButton.tsx'
 import { STEPS } from '../domain/steps.ts'
-import { FieldList, Tip, fieldVisible, type EngineField } from '../ui/Fields.tsx'
+import { FieldList, Switch, Tip, fieldOptions, fieldVisible, type EngineField } from '../ui/Fields.tsx'
+import { EdgeCases } from '../ui/EdgeCases.tsx'
+import { TypeStrip } from '../ui/TypeStrip.tsx'
+import { optionIcon } from '../ui/optionIcon.ts'
 import { isColor, isMeasure, parseColor } from '../domain/values.ts'
 import { CoordinateMap, ValueResults } from '../ui/Results.tsx'
-import { ClearButton } from '../ui/ClearButton.tsx'
 import { VaryButton } from '../ui/VaryButton.tsx'
+import { IconButton } from '../ui/IconButton.tsx'
+import { CartesianPlot } from '../ui/Plot.tsx'
+import { AppointmentCard } from '../ui/Appointment.tsx'
+import { mapEmbed } from '../domain/geo.ts'
+import { ClearButton } from '../ui/ClearButton.tsx'
 
 type Config = Record<string, unknown>
+const ALL = 'Todas as variações'
 
 function todayInput() {
   const now = new Date()
@@ -65,7 +72,7 @@ function validate(id: string, config: Config) {
       if (!Number.isFinite(alpha) || alpha < 0 || alpha > 100) return 'O alfa precisa estar entre 0 e 100.'
     }
   }
-  if (id === 'numero' && isMeasure(String(config.tipo)) && Number(config.min) > Number(config.max)) {
+  if (id === 'numero' && (isMeasure(String(config.tipo)) || config.tipo === 'Ponto cartesiano' || config.tipo === 'Pontos de função') && Number(config.min) > Number(config.max)) {
     return 'O mínimo está acima do máximo.'
   }
   if (id === 'mapa' && config.regiao === 'Informada') {
@@ -137,16 +144,36 @@ function structureConfig(config: Config) {
   }
 }
 
+// Últimos ajustes de cada gerador, para quem volta sempre ao mesmo. Só conveniência: falhou, usa o padrão.
+const STORE = (id: string) => `toki:gerador:v2:${id}`
+
+function loadConfig(id: string, def: Config, query: URLSearchParams) {
+  if ([...query.keys()].length) return applyQuery(def, query)
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE(id)) || 'null') as Config | null
+    if (!saved || typeof saved !== 'object') return structuredClone(def)
+    const next = structuredClone(def)
+    for (const name of Object.keys(def)) {
+      if (name in saved && typeof saved[name] === typeof def[name] && Array.isArray(saved[name]) === Array.isArray(def[name])) next[name] = saved[name]
+    }
+    return next
+  } catch {
+    return structuredClone(def)
+  }
+}
+
+function newSeed() {
+  return Math.floor(Math.random() * 1_000_000_000)
+}
+
 export function GeneratorPage({
   id,
   query,
   onToast,
-  firstStep = 1,
 }: {
   id: string
   query: URLSearchParams
   onToast: (message: string | Notice, bad?: boolean) => void
-  firstStep?: number
 }) {
   const engine = (ENG as unknown as Record<string, {
     kind: string
@@ -155,48 +182,40 @@ export function GeneratorPage({
     note?: () => string
     run: (config: Config, random: () => number) => GeneratedItem[]
   }>)[id]
-  const initial = useMemo(() => applyQuery(engine.def, query), [engine, query])
-  const [config, setConfig] = useState<Config>(initial)
+  const queryKey = query.toString()
+  const [config, setConfig] = useState<Config>(() => loadConfig(id, engine.def, new URLSearchParams(queryKey)))
   const [reference, setReference] = useState(todayInput)
   const [fixedSeed, setFixedSeed] = useState(false)
   const [seedText, setSeedText] = useState('4821')
-  const [previewSeed, setPreviewSeed] = useState(() => Math.floor(Math.random() * 1_000_000_000))
-  const [preview, setPreview] = useState<GeneratedItem[]>([])
+  const [randomSeed, setRandomSeed] = useState(newSeed)
+  const [items, setItems] = useState<GeneratedItem[]>([])
   const [diagnostics, setDiagnostics] = useState<GeneratedItem[]>([])
   const [text, setText] = useState('')
   const [code, setCode] = useState<{ code: string; tag: string; tone: string; info: string; svg?: string } | null>(null)
-  const [lote, setLote] = useState<GeneratedItem[] | null>(null)
-  const [loteText, setLoteText] = useState<string | null>(null)
-  const [loteCode, setLoteCode] = useState<typeof code>(null)
-  const [loteSeed, setLoteSeed] = useState<number | null>(null)
-  const [stale, setStale] = useState(false)
-  const error = validate(id, config)
-  const queryKey = query.toString()
+  const seed = fixedSeed ? Number(seedText) : randomSeed
+  const seedError = fixedSeed && (!Number.isInteger(seed) || seed < 0) ? 'A seed fixa precisa ser um inteiro maior ou igual a zero.' : null
+  const error = validate(id, config) ?? seedError
 
   useEffect(() => {
-    setConfig(applyQuery(engine.def, new URLSearchParams(queryKey)))
-    setLote(null)
-    setLoteText(null)
-    setLoteCode(null)
-    setStale(false)
-  }, [engine, id, queryKey])
+    try { localStorage.setItem(STORE(id), JSON.stringify(config)) } catch { /* sem armazenamento: só não lembra */ }
+  }, [config, id])
 
+  // Gera sozinho: ao abrir, ao mudar um ajuste e ao pedir outro. Espera a digitação parar um instante.
   useEffect(() => {
     if (error) return
-    const date = new Date(`${reference}T12:00:00`)
-    setReferenceDate(date)
-    const random = rng(previewSeed)
-    if (engine.kind === 'text') setText(genText(config, random))
-    else if (engine.kind === 'code') setCode(genStruct(structureConfig(config), random))
-    else {
-      const sample = { ...config }
-      if (typeof sample.qtd === 'number') sample.qtd = Math.min(sample.qtd, 8)
-      const items = engine.run(sample, random) as GeneratedItem[]
-      const split = splitDiagnostics(items)
-      setPreview(split.records)
-      setDiagnostics(split.diagnostics)
-    }
-  }, [config, engine, error, previewSeed, reference])
+    const timer = window.setTimeout(() => {
+      setReferenceDate(new Date(`${reference}T12:00:00`))
+      const random = rng(seed)
+      if (engine.kind === 'text') setText(genText(config, random))
+      else if (engine.kind === 'code') setCode(genStruct(structureConfig(config), random))
+      else {
+        const split = splitDiagnostics(engine.run(config, random) as GeneratedItem[])
+        setItems(split.records)
+        setDiagnostics(split.diagnostics)
+      }
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [config, engine, error, seed, reference])
 
   function update(name: string, value: unknown) {
     setConfig((current) => {
@@ -216,72 +235,36 @@ export function GeneratorPage({
       }
       return { ...current, origem: value, campos: [...next] }
     })
-    if (lote || loteText || loteCode) setStale(true)
   }
 
   function reset() {
+    try { localStorage.removeItem(STORE(id)) } catch { /* nada a limpar */ }
     setConfig(structuredClone(engine.def))
     setReference(todayInput())
     setFixedSeed(false)
     setSeedText('4821')
-    setPreview([])
-    setDiagnostics([])
-    setText('')
-    setCode(null)
-    setLote(null)
-    setLoteText(null)
-    setLoteCode(null)
-    setLoteSeed(null)
-    setStale(false)
-    setPreviewSeed(Math.floor(Math.random() * 1_000_000_000))
-    onToast('Configurações e prévia limpas.')
+    setRandomSeed(newSeed())
+    onToast('Ajustes de volta ao padrão.')
   }
 
-  function vary() {
-    setLote(null)
-    setLoteText(null)
-    setLoteCode(null)
-    setLoteSeed(null)
-    setStale(false)
-    setPreviewSeed(Math.floor(Math.random() * 1_000_000_000))
-  }
-
-  function generate() {
-    if (error) return
-    const seed = fixedSeed ? Number(seedText) : Math.floor(Math.random() * 1_000_000_000)
-    if (fixedSeed && (!Number.isInteger(seed) || seed < 0)) {
-      onToast('A seed fixa precisa ser um inteiro maior ou igual a zero.', true)
-      return
-    }
-    setReferenceDate(new Date(`${reference}T12:00:00`))
-    const random = rng(seed)
-    if (engine.kind === 'text') setLoteText(genText(config, random))
-    else if (engine.kind === 'code') setLoteCode(genStruct(structureConfig(config), random))
-    else {
-      const split = splitDiagnostics(engine.run(config, random) as GeneratedItem[])
-      setLote(split.records)
-      setDiagnostics(split.diagnostics)
-    }
-    setLoteSeed(seed)
-    setStale(false)
-    document.getElementById('resultado')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
-  async function copy(value: string) {
+  async function copy(value: string, what = 'Copiado.') {
     const ok = await copyText(value)
-    onToast(ok ? 'Copiado.' : 'Não foi possível copiar. O lote continua disponível.', !ok)
+    onToast(ok ? what : 'Não foi possível copiar.', !ok)
   }
 
+  // O tipo (campo mostrado em cartões) fica no topo, antes da prévia; os ajustes trazem o resto.
+  const typeField = (engine.fields as EngineField[]).find((field) => field.cards)
+  const lastType = useRef<string | undefined>(undefined)
   const grouped = useMemo(() => {
     const fields = engine.fields as EngineField[]
-    const used = new Set<string>()
+    const used = new Set<string>(typeField ? [typeField.k] : [])
     const take = (names: string[] = []) => names.flatMap((name) => {
       const field = fields.find((item) => item.k === name)
       if (!field || used.has(name)) return []
       used.add(name)
       return [field]
     })
-    const recipe = STEPS[id] ?? [['Configure as opções', '', fields.map((field) => field.k)] as [string, string, string[]]]
+    const recipe = STEPS[id] ?? [['Opções', '', fields.map((field) => field.k)] as [string, string, string[]]]
     const steps = recipe.map(([title, desc, keys, advanced]) => ({
       title,
       desc,
@@ -289,152 +272,197 @@ export function GeneratorPage({
       advanced: take(advanced ?? []),
     })).filter((step) => step.fields.length || step.advanced.length)
     return { steps, rest: fields.filter((field) => !used.has(field.k)) }
-  }, [engine, id])
-  const shown = lote ?? preview
-  const activeText = loteText ?? text
-  const activeCode = loteCode ?? code
-  const previewLimited = engine.kind !== 'text' && engine.kind !== 'code' && typeof config.qtd === 'number' && config.qtd > 8 && !lote
+  }, [engine, id, typeField])
   const visibleSteps = grouped.steps.filter((step) => step.fields.some((field) => fieldVisible(field, config)) || step.advanced.some((field) => fieldVisible(field, config)))
+  const list = engine.kind !== 'text' && engine.kind !== 'code'
+  const first = items[0]
+  // Os dadinhos de sempre: gera outro resultado (com seed fixa não muda, então fica desabilitado).
+  const another = <VaryButton disabled={Boolean(error) || fixedSeed} onClick={() => setRandomSeed(newSeed())} />
+  const geoLink = id === 'mapa' && first ? first.fields.find((field) => field.key === 'mapa')?.v ?? '' : ''
+  const geoSrc = geoLink ? mapEmbed(geoLink) : null
+  const plotted = id === 'numero' && (config.tipo === 'Ponto cartesiano' || config.tipo === 'Pontos de função')
+
+  function downloadCode() {
+    if (!code) return
+    const format = String(config.formato || 'txt')
+    if (format === 'Série' && config.saidaSerie === 'CSV') downloadText('serie.csv', code.code, 'text/csv;charset=utf-8')
+    else if (format === 'Lista') downloadText('lista.json', code.code, 'application/json')
+    else if (format === 'Hierarquia') downloadText('hierarquia.json', code.code, 'application/json')
+    else if (format === 'Série') downloadText('serie.json', code.code, 'application/json')
+    else if (format === 'Código de barras' || format === 'QR Code') downloadText('conteudo.txt', code.code, 'text/plain;charset=utf-8')
+    else {
+      const extension = format.toLowerCase()
+      downloadText(`estruturado.${extension === 'sql' ? 'sql' : extension}`, code.code, 'text/plain;charset=utf-8')
+    }
+    onToast(downloadNotice())
+  }
 
   return (
     <div className="work">
       <ClearButton onClick={reset} />
-      {visibleSteps.map((step, index) => (
-        <section className="step" key={step.title}>
-          <header className="step-title">
-            <b>{index + firstStep}</b>
-            <div>
-              <div className="step-heading">
-                <h2>{step.title}</h2>
-                {index === 0 && engine.note ? <Tip text={engine.note()} /> : null}
+
+      {typeField && fieldVisible(typeField, config) ? (
+        <>
+          <TypeStrip
+            label={typeof typeField.label === 'string' ? typeField.label : 'Tipo'}
+            groups={[{ items: fieldOptions(typeField, config).filter((option) => option !== ALL).map((option) => ({ value: option, label: option, icon: optionIcon(option) })) }]}
+            value={String(config[typeField.k] ?? '')}
+            onChange={(value) => { lastType.current = value; update(typeField.k, value) }}
+          />
+          {fieldOptions(typeField, config).includes(ALL) ? (
+            <div className="strip-all">
+              <Switch
+                checked={config[typeField.k] === ALL}
+                label="Todas as variações: uma massa com cada tipo"
+                onChange={(on) => update(typeField.k, on ? ALL : lastType.current ?? fieldOptions(typeField, config).find((option) => option !== ALL))}
+              />
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      <section className={`quick${id === 'estrutura' ? ' quick-plain' : ''}`} id="resultado" aria-label="Resultado" aria-live="polite">
+        {error ? <p className="banner bad">{error}</p> : null}
+        {!error && list && first ? (
+          <>
+            <div className="quick-head">
+              <h2 className="quick-title">Prévia{items.length > 1 ? <span className="muted"> · 1º de {items.length}, o lote completo fica abaixo dos ajustes</span> : null}</h2>
+              <div className="quick-actions">{another}</div>
+            </div>
+            {id === 'mapa' ? (
+              <div className="geo-card">
+                <div className="geo-info">
+                  <span className={`tone ${first.tone}`}>{first.tag}</span>
+                  <button type="button" className="geo-value" title="Clique para copiar" onClick={() => copy(first.fields[0]?.v ?? '')}>{first.fields[0]?.v}</button>
+                  <dl className="geo-facts">
+                    {first.fields.slice(1).filter((field) => field.key !== 'mapa').map((field) => (
+                      <div key={field.key}>
+                        <dt>{field.k}</dt>
+                        <dd><button type="button" title="Copiar" onClick={() => copy(field.v)}>{field.v}</button></dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {geoLink ? <a className="geo-link" href={geoLink} target="_blank" rel="noreferrer">Abrir no OpenStreetMap ↗</a> : null}
+                </div>
+                {geoSrc ? <iframe className="geo-map" title="Mapa da coordenada" src={geoSrc} loading="lazy" referrerPolicy="no-referrer-when-downgrade" /> : <div className="geo-map geo-empty">Sem mapa para esta coordenada.</div>}
               </div>
+            ) : id === 'borda' ? (
+              <EdgeCases items={items} onCopy={(value) => copy(value)} />
+            ) : id === 'data' ? (
+              <AppointmentCard item={first} onCopy={(value) => copy(value)} />
+            ) : plotted ? (
+              <div className="plot-card">
+                <ValueResults id={id} items={[first]} onCopy={(value) => copy(value)} />
+                <CartesianPlot items={items.slice(0, 500)} line={config.tipo === 'Pontos de função'} />
+              </div>
+            ) : <ValueResults id={id} items={[first]} onCopy={(value) => copy(value)} />}
+          </>
+        ) : null}
+        {!error && engine.kind === 'text' ? (
+          <>
+            <div className="quick-head">
+              <span className="muted">{Array.from(text).length} caracteres</span>
+              <div className="quick-actions">
+                <IconButton icon="copy" tip="Copiar texto" primary onClick={() => copy(text, 'Texto copiado.')} />
+                {another}
+                <IconButton icon="download" tip="Baixar TXT" badge="TXT" onClick={() => { downloadText('texto.txt', text); onToast(downloadNotice()) }} />
+              </div>
+            </div>
+            <pre className="quick-text">{text || ' '}</pre>
+          </>
+        ) : null}
+        {!error && engine.kind === 'code' && code ? (
+          <>
+            <div className="quick-head">
+              <span className={`tone ${code.tone}`}>{code.tag}</span>
+              <div className="quick-actions">
+                <IconButton icon="copy" tip="Copiar conteúdo" primary onClick={() => copy(code.code, 'Conteúdo copiado.')} />
+                {another}
+                <IconButton icon="download" tip="Baixar arquivo" onClick={downloadCode} />
+                {code.svg ? <IconButton icon="image" tip="Baixar imagem (SVG)" badge="SVG" onClick={() => { downloadText('codigo.svg', code.svg || '', 'image/svg+xml'); onToast(downloadNotice()) }} /> : null}
+              </div>
+            </div>
+            {code.info ? <p className="muted">{code.info}</p> : null}
+            {code.svg ? <div className="symbol-preview" dangerouslySetInnerHTML={{ __html: code.svg }} /> : null}
+            <pre className="quick-text">{code.code}</pre>
+          </>
+        ) : null}
+        {diagnostics.map((item) => <p key={item.rule} className="banner">{item.fields.map((field) => field.v).join(' ')}</p>)}
+      </section>
+
+      <section className="step settings" aria-labelledby="ajustes">
+        <header className="settings-head">
+          <h2 id="ajustes">Ajustes</h2>
+          {engine.note ? <Tip text={engine.note()} /> : null}
+          <span className="muted">O resultado acompanha cada mudança.</span>
+        </header>
+        <div className="settings-grid">
+        {visibleSteps.map((step) => (
+          <div className="settings-group" key={step.title}>
+            <div className="settings-label">
+              <h3>{step.title}</h3>
               {step.desc ? <p>{step.desc}</p> : null}
             </div>
-          </header>
-          {step.fields.length ? <FieldList fields={step.fields} config={config} onChange={update} /> : null}
-          {step.advanced.length ? (
-            <details className="adv-box">
-              <summary>Opções avançadas</summary>
-              <FieldList fields={step.advanced} config={config} onChange={update} />
-            </details>
-          ) : null}
-        </section>
-      ))}
-      <section className="step">
-        <header className="step-title">
-          <b>{visibleSteps.length + firstStep}</b>
-          <div>
-            <h2>Defina a geração do lote</h2>
-            <p>Quantidade, data de referência e seed usada na exportação.</p>
+            <div className="settings-controls">
+              {step.fields.length ? <FieldList fields={step.fields} config={config} onChange={update} /> : null}
+              {step.advanced.length ? (
+                <details className="adv-box">
+                  <summary>Mais opções</summary>
+                  <FieldList fields={step.advanced} config={config} onChange={update} />
+                </details>
+              ) : null}
+            </div>
           </div>
-        </header>
-        <div className="fields">
-          {grouped.rest.length ? <FieldList fields={grouped.rest} config={config} onChange={update} /> : null}
-          <label className="field">
-            <span>Data de referência</span>
-            <input type="date" value={reference} onChange={(event) => { setReference(event.target.value); setStale(true) }} />
-          </label>
-          <label className="field">
-            <span>Seed</span>
-            <select value={fixedSeed ? 'fixa' : 'nova'} onChange={(event) => setFixedSeed(event.target.value === 'fixa')}>
-              <option value="nova">Nova a cada geração</option>
-              <option value="fixa">Fixa</option>
-            </select>
-          </label>
-          {fixedSeed ? (
-            <label className="field">
-              <span>Valor da seed</span>
-              <input value={seedText} onChange={(event) => setSeedText(event.target.value)} />
-            </label>
-          ) : null}
+        ))}
+        {grouped.rest.length ? (
+          <div className="settings-group">
+            <div className="settings-label">
+              <h3>Lote</h3>
+              <p>Quantos itens gerar de uma vez.</p>
+            </div>
+            <div className="settings-controls">
+              <FieldList fields={grouped.rest} config={config} onChange={update} />
+            </div>
+          </div>
+        ) : null}
         </div>
-        {error ? <p className="banner bad">{error}</p> : null}
-        <button id="mf-generate" className="primary" type="button" disabled={Boolean(error)} onClick={generate}>
-          Gerar lote
-        </button>
+        <details className="adv-box settings-adv">
+          <summary>Avançado: data de referência e seed</summary>
+          <div className="fields">
+            <label className="field">
+              <span>Data de referência</span>
+              <input type="date" value={reference} onChange={(event) => setReference(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>Seed</span>
+              <select value={fixedSeed ? 'fixa' : 'nova'} onChange={(event) => setFixedSeed(event.target.value === 'fixa')}>
+                <option value="nova">Nova a cada “Outro”</option>
+                <option value="fixa">Fixa (reproduz o mesmo lote)</option>
+              </select>
+            </label>
+            {fixedSeed ? (
+              <label className="field">
+                <span>Valor da seed</span>
+                <input inputMode="numeric" value={seedText} onChange={(event) => setSeedText(event.target.value)} />
+              </label>
+            ) : <p className="muted">Seed desta geração: {randomSeed}</p>}
+          </div>
+        </details>
       </section>
-      <section className="panel" id="resultado">
-        <header className="preview-head">
-          <h2>{lote || loteText || loteCode ? 'Lote gerado' : 'Prévia'}</h2>
-          <VaryButton disabled={Boolean(error)} onClick={vary} />
-        </header>
-        {stale ? <p className="banner">A configuração mudou. Exportar ainda usa o último lote, não a prévia nova.</p> : null}
-        {previewLimited ? <p className="muted">Prévia das primeiras 8 linhas. O lote gerado traz as {String(config.qtd)} pedidas.</p> : null}
-        {loteSeed !== null ? <p className="muted">Seed do lote: {loteSeed}. Data de referência: {reference}.</p> : null}
-        {diagnostics.map((item) => <p key={item.rule} className="banner">{item.fields.map((field) => field.v).join(' ')}</p>)}
-        {engine.kind === 'text' && (
-          <>
-            <div className="view-block">
-              <div className="copy-block">
-                <pre>{activeText || ' '}</pre>
-                <CopyButton label="Copiar texto" onCopy={() => copy(activeText)} />
-              </div>
-              <p className="char-count">Qtd caracteres: {Array.from(activeText).length}</p>
-            </div>
-            <div className="row-actions">
-              <button type="button" className="download" onClick={() => { downloadText('texto.txt', loteText ?? activeText); onToast(downloadNotice()) }}>Baixar TXT</button>
-            </div>
-          </>
-        )}
-        {engine.kind === 'code' && activeCode && (
-          <>
-            {activeCode.info ? <p>{activeCode.info}</p> : null}
-            {activeCode.svg ? <div className="symbol-preview" dangerouslySetInnerHTML={{ __html: activeCode.svg }} /> : null}
-            <div className="view-block">
-              <div className="copy-block">
-                <pre>{activeCode.code}</pre>
-                <CopyButton label="Copiar conteúdo" onCopy={() => copy(activeCode.code)} />
-              </div>
-              <p className="char-count"><span className={`tone ${activeCode.tone}`}>{activeCode.tag}</span></p>
-            </div>
-            <div className="row-actions">
-              <button type="button" className="download" disabled={!loteCode} onClick={() => {
-                const format = String(config.formato || 'txt')
-                const payload = loteCode?.code || ''
-                if (format === 'Série' && config.saidaSerie === 'CSV') downloadText('serie.csv', payload, 'text/csv;charset=utf-8')
-                else if (format === 'Lista') downloadText('lista.json', payload, 'application/json')
-                else if (format === 'Hierarquia') downloadText('hierarquia.json', payload, 'application/json')
-                else if (format === 'Série') downloadText('serie.json', payload, 'application/json')
-                else if (format === 'Código de barras' || format === 'QR Code') downloadText('conteudo.txt', payload, 'text/plain;charset=utf-8')
-                else {
-                  const extension = format.toLowerCase()
-                  downloadText(`estruturado.${extension === 'sql' ? 'sql' : extension}`, payload, 'text/plain;charset=utf-8')
-                }
-                onToast(downloadNotice())
-              }}>Baixar lote</button>
-              {loteCode?.svg ? <button type="button" className="download" onClick={() => {
-                downloadText('codigo.svg', loteCode.svg || '', 'image/svg+xml')
-                onToast(downloadNotice())
-              }}>Baixar imagem</button> : null}
-            </div>
-          </>
-        )}
-        {engine.kind !== 'text' && engine.kind !== 'code' && (
-          <>
-            <ValueResults id={id} items={shown.slice(0, 100)} onCopy={copy} />
-            {shown.length > 100 ? <p className="muted">Exibindo 100 de {shown.length}. Baixar CSV inclui o lote inteiro.</p> : null}
-            <div className="row-actions">
-              <button type="button" disabled={!lote?.length} onClick={() => lote && copy(recordsToCsv(lote).replace(/^\uFEFF/, ''))}>Copiar CSV</button>
-              <button type="button" disabled={!lote?.length} onClick={() => {
-                if (!lote) return
-                downloadText('lote.csv', recordsToCsv(lote), 'text/csv;charset=utf-8')
-                onToast(downloadNotice())
-              }}>Baixar CSV</button>
-              <button type="button" disabled={!lote?.length} onClick={() => {
-                if (!lote) return
-                downloadText('lote.json', recordsToJson(lote), 'application/json')
-                onToast(downloadNotice())
-              }}>Baixar JSON</button>
-            </div>
-          </>
-        )}
-      </section>
-      {id === 'mapa' && shown.length ? (
-        <section className="panel" aria-label="Mapa">
+
+      {list && !error && items.length > 1 ? (
+        <section className="panel" aria-labelledby="lote">
           <header className="preview-head">
-            <h2>Mapa</h2>
+            <h2 id="lote">Lote · {items.length} {items.length === 1 ? 'item' : 'itens'}</h2>
+            <div className="row-actions lote-actions">
+              <IconButton icon="copy" tip="Copiar o lote em CSV" badge="CSV" onClick={() => copy(recordsToCsv(items).replace(/^\uFEFF/, ''), 'CSV copiado.')} />
+              <IconButton icon="download" tip="Baixar CSV" badge="CSV" onClick={() => { downloadText('lote.csv', recordsToCsv(items), 'text/csv;charset=utf-8'); onToast(downloadNotice()) }} />
+              <IconButton icon="download" tip="Baixar JSON" badge="JSON" onClick={() => { downloadText('lote.json', recordsToJson(items), 'application/json'); onToast(downloadNotice()) }} />
+            </div>
           </header>
-          <CoordinateMap key={shown.slice(0, 8).map((item) => item.fields.map((field) => field.v).join('|')).join('\n')} items={shown.slice(0, 100)} />
+          <ValueResults id={id} items={items.slice(0, 100)} onCopy={(value) => copy(value)} />
+          {items.length > 100 ? <p className="muted">Mostrando 100 de {items.length}. CSV e JSON levam o lote inteiro.</p> : null}
+          {id === 'mapa' ? <CoordinateMap key={items.slice(0, 8).map((item) => item.fields.map((field) => field.v).join('|')).join(';')} items={items.slice(0, 100)} /> : null}
         </section>
       ) : null}
     </div>

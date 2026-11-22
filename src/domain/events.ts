@@ -2,7 +2,7 @@ import JSZip from 'jszip'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { EVENT_AREAS, type EventKind, type Tone } from './eventRules.ts'
 import { cpfValid } from './inspect/people.ts'
-import { bad, ok, verdict, warn, type Check, type Verdict } from './inspect/verdict.ts'
+import { bad, ok, portaria, warn, type Check, type Verdict } from './inspect/verdict.ts'
 import { encodePng } from './media.ts'
 import { cpfD, fmtCpf, getReferenceDate, person } from './mfEngine.ts'
 import { qrRaster } from './symbols.ts'
@@ -546,7 +546,7 @@ function checkTicket(input: string, context: CheckContext, seen: Map<string, num
   const labels = { ok: 'Entrada liberada', bad: 'Entrada barrada', warn: 'Liberar com atenção' }
   const parts = input.split('|')
   const early = signed(parts, 'MFT1', 9, 'um ingresso')
-  if (early) return verdict(input, early, labels)
+  if (early) return portaria(input, early, labels)
   const [, event, id, type, sector, seat, until, status] = parts
   const checks: Check[] = [ok('Formato', `Ingresso ${id}.`), ok('Assinatura', 'A assinatura confere.'), eventCheck(event, context.evento), untilCheck('Validade', until, context.data)]
   if (status === 'U') checks.push(bad('Status', 'Já utilizado: o ingresso passou pela catraca antes.'))
@@ -558,14 +558,14 @@ function checkTicket(input: string, context: CheckContext, seen: Map<string, num
   if (type === 'MEIA') checks.push(warn('Meia-entrada', 'Peça o comprovante do direito à meia na entrada.'))
   else checks.push(ok('Tipo', type === 'CORTESIA' ? 'Cortesia.' : 'Inteira.'))
   checks.push(ok('Lugar', seat === '-' ? `Setor ${sector}, sem assento marcado.` : `Setor ${sector}, assento ${seat}.`))
-  return verdict(input, checks, labels)
+  return portaria(input, checks, labels)
 }
 
 function checkCredential(input: string, context: CheckContext): Verdict {
   const labels = { ok: 'Acesso liberado', bad: 'Acesso barrado', warn: 'Liberar com atenção' }
   const parts = input.split('|')
   const early = signed(parts, 'MFC1', 8, 'uma credencial')
-  if (early) return verdict(input, early, labels)
+  if (early) return portaria(input, early, labels)
   const [, event, id, role, areas, until, status] = parts
   const list = areas.split('+')
   const checks: Check[] = [
@@ -576,7 +576,7 @@ function checkCredential(input: string, context: CheckContext): Verdict {
     status === 'R' ? bad('Status', 'Revogada pela organização.') : ok('Status', 'Ativa.'),
     list.includes(context.area) ? ok('Área', `Libera ${context.area}.`) : bad('Área', `Libera ${list.join(', ')}, não ${context.area}.`),
   ]
-  return verdict(input, checks, labels)
+  return portaria(input, checks, labels)
 }
 
 function checkCoupon(input: string, context: CheckContext): Verdict {
@@ -590,11 +590,11 @@ function checkCoupon(input: string, context: CheckContext): Verdict {
       input.endsWith(digit) ? ok('Dígito', 'O dígito verificador confere.') : bad('Dígito', `O dígito verificador certo seria ${digit}.`),
       warn('Vigência e usos', 'Só o código não traz vigência nem usos. Valide o QR do cupom para conferir tudo.'),
     ]
-    return verdict(input, checks, labels)
+    return portaria(input, checks, labels)
   }
   const parts = input.split('|')
   const early = signed(parts, 'MFV1', 9, 'um cupom')
-  if (early) return verdict(input, early, labels)
+  if (early) return portaria(input, early, labels)
   const [, event, code, percent, start, end, limit, used] = parts
   const base = code.slice(0, -2)
   const day = ymd(context.data)
@@ -606,7 +606,7 @@ function checkCoupon(input: string, context: CheckContext): Verdict {
     day < start ? bad('Vigência', `Começa em ${showYmd(start)}.`) : day > end ? bad('Vigência', `Terminou em ${showYmd(end)}.`) : ok('Vigência', `De ${showYmd(start)} a ${showYmd(end)}.`),
     Number(used) >= Number(limit) ? bad('Usos', `Esgotado: ${used} de ${limit}.`) : ok('Usos', `${Number(limit) - Number(used)} de ${limit} restantes.`),
   ]
-  return verdict(input, checks, labels)
+  return portaria(input, checks, labels)
 }
 
 function ageOn(birth: string, day: Date) {
@@ -643,7 +643,7 @@ function checkRegistration(record: Record<string, unknown>, context: CheckContex
     if (before > 0) checks.push(bad('Duplicidade', 'Este CPF já apareceu antes nesta conferência.'))
   }
   const label = text('inscricao') || text('nome') || 'inscrição'
-  return verdict(label, checks, labels)
+  return portaria(label, checks, labels)
 }
 
 function parseRecords(text: string): Record<string, unknown>[] | string {

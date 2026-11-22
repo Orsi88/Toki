@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Toki",
+  "version": "0.2.0",
+  "description": "Dados de teste em qualquer página: gere CPF, CNPJ, e-mail, pessoa coerente e mais, insira no campo e capture formulários.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Toki (Alt+Shift+T)",
+    "default_icon": "icon.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+T"
+      },
+      "description": "Abrir o menu do Toki"
+    }
+  },
+  "icons": {
+    "128": "icon.png"
+  }
+}

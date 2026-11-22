@@ -173,7 +173,6 @@ export function StrategyPage({
       <ClearButton disabled={busy} onClick={reset} />
       <section className="step">
         <header className="step-title">
-          <b>1</b>
           <div>
             <h2>{current?.name}</h2>
             <p>{HINT[strategy]}</p>

@@ -1,8 +1,7 @@
 export function VaryButton({ disabled, onClick }: { disabled?: boolean; onClick: () => void }) {
   return (
-    <button type="button" className="vary" disabled={disabled} onClick={onClick} aria-label="Gerar variação">
-      Gerar
-      <svg className="vary-dice" width="20" height="20" viewBox="0 0 32 32" aria-hidden="true">
+    <button type="button" className="vary" disabled={disabled} onClick={onClick} aria-label="Gerar outro" data-tip={disabled ? 'Indisponível agora' : 'Gerar outro'}>
+      <svg className="vary-dice" width="24" height="24" viewBox="0 0 32 32" aria-hidden="true">
         <g transform="rotate(18 22 9)">
           <rect x="16" y="2.5" width="12" height="12" rx="2.4" fill="currentColor" />
           <circle cx="19.4" cy="5.9" r="1" fill="#fff" />

@@ -104,6 +104,12 @@ const TYPES: Record<string, string> = {
   corrompido: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z M14 3v5h5 M9.5 12.5l5 5 M14.5 12.5l-5 5',
   truncado: 'M14 3H7a2 2 0 0 0-2 2v8 M14 3v5h5v5 M5 16.5h2 M9.5 16.5h2 M14 16.5h2 M18.5 16.5h.5',
   extensao_divergente: 'M7 7.5h12l-3-3 M17 16.5H5l3 3',
+  expressao: 'M5 12h4 M7 10v4 M14 12h5 M4 19l3-3 M4 16l3 3 M14 6.5l4 4 M18 6.5l-4 4',
+  formula_de_planilha: 'M4 5h16v14H4z M4 10h16 M10 10v9 M13.5 13.5c1.5 0 1.2 3.5 3 3.5',
+  ponto_cartesiano: 'M12 3v18 M3 12h18 M16.5 7.5h.01 M16.5 7.5m-1.5 0a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0',
+  pontos_de_funcao: 'M4 4v16h16 M6 17c3-1 4-10 7-10s3 6 6 4',
+    ficha: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M3 19c.8-2.6 2.6-4 5-4s4.2 1.4 5 4 M15 7h6 M15 11h6 M15 15h4',
+  endereco: 'M4 11l8-7 8 7 M6 9.5V20h12V9.5 M10 20v-5h4v5',
 }
 
 export function TypeIcon({ name }: { name: string }) {

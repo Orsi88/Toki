@@ -185,6 +185,41 @@ function ChipField({
   )
 }
 
+// Escolha curta (até 4 opções breves) fica à vista como seletor segmentado: um clique, sem abrir lista.
+function isSegmented(options: string[]) {
+  return options.length >= 2 && options.length <= 4 && options.join('').length <= 44
+}
+
+function Segmented({ id, label, options, value, onChange }: { id: string; label: string; options: string[]; value: string; onChange: (value: string) => void }) {
+  function move(step: number) {
+    const index = Math.max(0, options.indexOf(value))
+    const next = options[(index + step + options.length) % options.length]
+    onChange(next)
+    window.requestAnimationFrame(() => document.getElementById(`${id}-${options.indexOf(next)}`)?.focus())
+  }
+  return (
+    <div className="segmented" role="radiogroup" aria-label={label}>
+      {options.map((option, index) => (
+        <button
+          key={option}
+          id={`${id}-${index}`}
+          type="button"
+          role="radio"
+          aria-checked={option === value}
+          tabIndex={option === value ? 0 : -1}
+          onClick={() => onChange(option)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); move(1) }
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); move(-1) }
+          }}
+        >
+          {option}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function FieldList({
   fields,
   config,
@@ -254,6 +289,16 @@ export function FieldList({
         </div>
       )
     }
+    const choices = field.type === 'seg' || field.type === 'sel' ? fieldOptions(field, config) : []
+    if (isSegmented(choices)) {
+      return (
+        <div className="field" key={field.k}>
+          <span className="field-name">{label}</span>
+          {help ? <Tip text={help} /> : null}
+          <Segmented id={id} label={label} options={choices} value={String(config[field.k] ?? '')} onChange={(value) => onChange(field.k, value)} />
+        </div>
+      )
+    }
     return (
       <div className="field" key={field.k}>
         {field.type === 'tog' ? <span aria-hidden="true">&nbsp;</span> : <label className="field-name" htmlFor={id}>{label}</label>}
@@ -263,13 +308,22 @@ export function FieldList({
             {fieldOptions(field, config).map((option) => <option key={option}>{option}</option>)}
           </select>
         )}
-            {field.type === 'num' && (
-              <input
-                id={id}
-                type="number"
-            value={config[field.k] === '' || config[field.k] === undefined ? '' : String(config[field.k])}
-            onChange={(event) => onChange(field.k, event.target.value === '' ? '' : Number(event.target.value))}
-          />
+        {field.type === 'num' && (
+          <div className={field.presets ? 'num-row' : 'num-solo'}>
+            <input
+              id={id}
+              type="number"
+              value={config[field.k] === '' || config[field.k] === undefined ? '' : String(config[field.k])}
+              onChange={(event) => onChange(field.k, event.target.value === '' ? '' : Number(event.target.value))}
+            />
+            {field.presets ? (
+              <div className="presets" aria-label={`Atalhos de ${label}`}>
+                {field.presets.map((preset) => (
+                  <button key={preset} type="button" aria-pressed={config[field.k] === preset} onClick={() => onChange(field.k, preset)}>{preset}</button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         )}
             {field.type === 'txt' && (
               <input
@@ -290,13 +344,6 @@ export function FieldList({
         {field.type === 'chips' && (
           <ChipField field={field} config={config} onChange={onChange} inputId={id} />
         )}
-        {field.presets && field.type === 'num' ? (
-          <div className="presets">
-            {field.presets.map((preset) => (
-              <button key={preset} type="button" onClick={() => onChange(field.k, preset)}>{preset}</button>
-            ))}
-          </div>
-        ) : null}
       </div>
     )
   }

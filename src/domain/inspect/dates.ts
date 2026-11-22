@@ -26,7 +26,7 @@ function dayChecks(y: number, m: number, d: number, options: DateOptions): { che
   if (m === 2 && d === 29) checks.push(ok('Bissexto', `29 de fevereiro num ano bissexto (${y}).`))
   const diff = Math.round((date.getTime() - new Date(options.day.getFullYear(), options.day.getMonth(), options.day.getDate()).getTime()) / 864e5)
   checks.push(ok('Referência', diff === 0 ? 'É a data de referência.' : diff < 0 ? `${-diff} dias antes da referência.` : `${diff} dias depois da referência.`))
-  if (y < 1900 || y > 2100) checks.push(warn('Ano', `${y} fica fora do intervalo que muitos sistemas aceitam (1900 a 2100).`))
+  if (y < 1900 || y > 2100) checks.push(warn('Ano', `${y}, fora da faixa 1900 a 2100.`))
   const min = options.min ? new Date(`${options.min}T00:00:00`) : null
   const max = options.max ? new Date(`${options.max}T00:00:00`) : null
   if (min && date < min) checks.push(bad('Intervalo', `Antes do mínimo ${fmtDate(min)}.`))
@@ -46,7 +46,7 @@ function parseLine(value: string, formato: string, options: DateOptions): Check[
     const ms = value.replace('-', '').length >= 12 ? Number(value) : Number(value) * 1000
     const date = new Date(ms)
     const checks = [ok('Formato', `Timestamp Unix em ${value.replace('-', '').length >= 12 ? 'milissegundos' : 'segundos'}.`), ok('Instante', `${fmtDate(date)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())} (horário local).`)]
-    if (Number(value) > 2147483647 && value.length <= 10) checks.push(warn('2038', 'Passa de 2.147.483.647: estoura campos de 32 bits (problema do ano 2038).'))
+    if (Number(value) > 2147483647 && value.length <= 10) checks.push(warn('2038', 'Acima de 2.147.483.647, o maior inteiro de 32 bits com sinal (marco do ano 2038).'))
     if (Number(value) < 0) checks.push(warn('Época', 'Antes de 1970: alguns sistemas não aceitam timestamp negativo.'))
     return checks
   }

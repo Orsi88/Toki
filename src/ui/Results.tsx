@@ -52,23 +52,33 @@ export function ValueResults({
   if (id === 'cartao') return <PlasticCard item={item} onCopy={onCopy} />
   if (id === 'boleto') return <BoletoSlip item={item} onCopy={onCopy} />
   if (id === 'identidade') return <IdentityCard item={item} onCopy={onCopy} />
+  if (id === 'empresa') return <CompanyCard item={item} onCopy={onCopy} />
   return <FieldStack item={item} onCopy={onCopy} />
 }
 
 function FieldStack({ item, onCopy }: { item: GeneratedItem; onCopy: (value: string) => void }) {
   const qr = item.fields.find((field) => isQr(field.key, field.v))
+  // Ficha em papel (comprovante): rótulo e valor ligados por pontilhado, copiar em cada linha.
   return (
-    <div className="stack">
-      {qr ? <div className="qr-inline"><QrCode value={qr.v} size={180} label={qr.k} /></div> : null}
-      <p><span className={`tone ${item.tone}`}>{item.tag}</span></p>
-      {item.fields.map((field) => (
-        <div key={field.key} className="copy-row">
-          <span>{field.k}</span>
-          <strong>{parseColor(field.v) && field.key === 'valor' ? <i className="swatch" style={{ background: field.v }} /> : null}{displayValue(field.v)}</strong>
-          <CopyButton label={`Copiar ${field.k}`} onCopy={() => onCopy(field.v)} />
-        </div>
-      ))}
-      {item.checks?.length ? <p className="muted">{item.checks.map((check) => check[0]).join(' · ')}</p> : null}
+    <div className="stack slip-wrap">
+      <article className="slip">
+        <header className="slip-head">
+          <span className="slip-brand">Toki · dados de teste</span>
+          <span className={`tone ${item.tone}`}>{item.tag}</span>
+        </header>
+        {qr ? <div className="qr-inline"><QrCode value={qr.v} size={180} label={qr.k} /></div> : null}
+        <dl className="slip-rows">
+          {item.fields.map((field) => (
+            <div key={field.key} className="slip-row">
+              <dt>{field.k}</dt>
+              <span className="slip-dots" aria-hidden="true" />
+              <dd>{parseColor(field.v) && field.key === 'valor' ? <i className="swatch" style={{ background: field.v }} /> : null}{displayValue(field.v)}</dd>
+              <CopyButton label={`Copiar ${field.k}`} onCopy={() => onCopy(field.v)} />
+            </div>
+          ))}
+        </dl>
+        {item.checks?.length ? <footer className="slip-foot">{item.checks.map((check) => check[0]).join(' · ')}</footer> : null}
+      </article>
     </div>
   )
 }
@@ -217,7 +227,7 @@ function IdentityCard({ item, onCopy }: { item: GeneratedItem; onCopy: (value: s
   return (
     <article className="id-card">
       <header>
-        <span>Dados fictícios — uso em testes</span>
+        <span>Pessoa física · dados fictícios para testes</span>
       </header>
       <div className="id-person">
         <b>{initials || 'MF'}</b>
@@ -225,6 +235,40 @@ function IdentityCard({ item, onCopy }: { item: GeneratedItem; onCopy: (value: s
           <h3>
             {name}
             <CopyButton label="Copiar nome" onCopy={() => onCopy(name)} />
+          </h3>
+          {sub ? <p>{sub}</p> : null}
+        </div>
+      </div>
+      <div className="id-grid">
+        {item.fields.map((field) => (
+          <div key={field.key}>
+            <span>{field.k}<CopyButton label={`Copiar ${field.k}`} onCopy={() => onCopy(field.v)} /></span>
+            <strong>{displayValue(field.v)}</strong>
+          </div>
+        ))}
+      </div>
+    </article>
+  )
+}
+
+type CompanyMeta = { fantasia?: string; razao?: string; cidade?: string; uf?: string; age?: number }
+
+function CompanyCard({ item, onCopy }: { item: GeneratedItem; onCopy: (value: string) => void }) {
+  const meta = (item as GeneratedItem & { meta?: CompanyMeta }).meta
+  const name = meta?.fantasia || valueOf(item, 'nome_fantasia') || 'Empresa fictícia'
+  const initials = name.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
+  const sub = [meta?.razao, [meta?.cidade, meta?.uf].filter(Boolean).join(' – '), meta?.age != null ? `aberta há ${meta.age} ${meta.age === 1 ? 'ano' : 'anos'}` : ''].filter(Boolean).join(' · ')
+  return (
+    <article className="id-card id-card-company">
+      <header>
+        <span>Pessoa jurídica · dados fictícios para testes</span>
+      </header>
+      <div className="id-person">
+        <b>{initials || 'PJ'}</b>
+        <div>
+          <h3>
+            {name}
+            <CopyButton label="Copiar nome fantasia" onCopy={() => onCopy(name)} />
           </h3>
           {sub ? <p>{sub}</p> : null}
         </div>

@@ -76,14 +76,13 @@ export function validateCoords(text: string, options: GeoOptions): Outcome {
   if (!items.length) return emptyInput('Cole ao menos uma coordenada, uma por linha.')
   const box = boxOf(options)
   const region = options.regiao === 'Informada' ? 'a área informada' : options.regiao === 'Mundo' ? 'o globo' : 'o Brasil'
-  const labels = { ok: 'Coordenada válida', bad: 'Coordenada inválida', warn: 'Coordenada com ressalva' }
   return {
     verdicts: items.map((item) => {
       const area = item.split(/\s*(?:→|->|;\s*(?=-?\d))\s*/)
       if (area.length === 2) {
         const sw = parsePoint(area[0])
         const ne = parsePoint(area[1])
-        if (typeof sw === 'string' || typeof ne === 'string') return verdict(item, [bad('Formato', typeof sw === 'string' ? `Sudoeste: ${sw}` : `Nordeste: ${ne}`)], labels)
+        if (typeof sw === 'string' || typeof ne === 'string') return verdict(item, [bad('Formato', typeof sw === 'string' ? `Sudoeste: ${sw}` : `Nordeste: ${ne}`)])
         const checks: Check[] = [ok('Formato', 'Área (sudoeste → nordeste).')]
         const valid = [sw, ne].every((point) => point.lat >= -90 && point.lat <= 90 && point.lng >= -180 && point.lng <= 180)
         if (!valid) checks.push(bad('Limites', 'Algum canto está fora do globo.'))
@@ -91,10 +90,10 @@ export function validateCoords(text: string, options: GeoOptions): Outcome {
         else if (sw.lat === ne.lat || sw.lng === ne.lng) checks.push(bad('Limites', 'Área com largura ou altura zero.'))
         else checks.push(ok('Limites', `${(ne.lat - sw.lat).toFixed(4)}° × ${(ne.lng - sw.lng).toFixed(4)}°.`))
         if (valid && box !== WORLD) checks.push(inside(sw, box) && inside(ne, box) ? ok('Região', `Dentro de ${region}.`) : bad('Região', `Sai de ${region}.`))
-        return verdict(item, checks, { ok: 'Área válida', bad: 'Área inválida', warn: 'Área com ressalva' })
+        return verdict(item, checks)
       }
       const point = parsePoint(item)
-      return verdict(item, typeof point === 'string' ? [bad('Formato', point)] : pointChecks(point, box, region), labels)
+      return verdict(item, typeof point === 'string' ? [bad('Formato', point)] : pointChecks(point, box, region))
     }),
   }
 }

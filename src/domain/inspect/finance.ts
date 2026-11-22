@@ -104,7 +104,7 @@ function pixPayloadChecks(payload: string): Check[] {
   const { fields, broken } = tlv(payload)
   if (broken >= 0) return [bad('Estrutura', `O campo na posição ${broken} não segue ID + tamanho + valor.`)]
   const get = (id: string) => fields.find((field) => field.id === id)?.value
-  checks.push(get('00') === '01' ? ok('Versão', 'Payload EMV 01.') : bad('Versão', 'O campo 00 precisa ser 01.'))
+  checks.push(get('00') === '01' ? ok('Versão', 'Payload EMV 01.') : bad('Versão', `Campo 00 = ${get('00') || 'ausente'} (o padrão EMV usa 01).`))
   const account = fields.find((field) => Number(field.id) >= 26 && Number(field.id) <= 51 && field.value.toLowerCase().includes('br.gov.bcb.pix'))
   if (!account) checks.push(bad('Conta', 'Sem o campo do arranjo br.gov.bcb.pix.'))
   else {
@@ -118,7 +118,7 @@ function pixPayloadChecks(payload: string): Check[] {
   checks.push(get('53') === '986' ? ok('Moeda', 'Real (986).') : bad('Moeda', `Moeda ${get('53') ?? 'ausente'}; PIX usa 986.`))
   const amount = get('54')
   if (amount !== undefined) checks.push(/^\d{1,10}(\.\d{1,2})?$/.test(amount) && Number(amount) > 0 ? ok('Valor', `R$ ${Number(amount).toFixed(2).replace('.', ',')}.`) : bad('Valor', `"${amount}" não é valor positivo com ponto decimal.`))
-  checks.push(get('58') === 'BR' ? ok('País', 'BR.') : bad('País', 'O campo 58 precisa ser BR.'))
+  checks.push(get('58') === 'BR' ? ok('País', 'BR.') : bad('País', `Campo 58 = ${get('58') || 'ausente'}.`))
   const name = get('59')
   checks.push(!name ? bad('Recebedor', 'Sem nome (59).') : name.length > 25 ? bad('Recebedor', 'Nome passa de 25 caracteres.') : ok('Recebedor', name))
   const city = get('60')
@@ -242,7 +242,7 @@ export function validateFinance(text: string, tipo: string, day: Date): Outcome 
   return {
     verdicts: items.map((item) => {
       const kind = tipo === 'Detectar' ? detectFinance(item) : tipo
-      const checks: Check[] = tipo === 'Detectar' ? [ok('Tipo', `Detectado como ${kind}.`)] : []
+      const checks: Check[] = tipo === 'Detectar' ? [ok('Reconhecido como', kind)] : []
       if (kind === 'Cartão') checks.push(...cardChecks(item, day))
       else if (kind === 'Boleto') checks.push(...boletoChecks(item, day))
       else checks.push(...(item.startsWith('000201') ? pixPayloadChecks(item) : pixKeyChecks(item)))

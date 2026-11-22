@@ -9,9 +9,11 @@ import { rng, setReferenceDate } from '../domain/mfEngine.ts'
 import { qrRaster } from '../domain/symbols.ts'
 import { copyText, downloadBlob, downloadBytes, downloadNotice, downloadText, type Notice } from '../ui/browser.ts'
 import { ClearButton } from '../ui/ClearButton.tsx'
+import { IconButton } from '../ui/IconButton.tsx'
+import { VaryButton } from '../ui/VaryButton.tsx'
 import { EventPass } from '../ui/EventPass.tsx'
 import { FieldList, type EngineField } from '../ui/Fields.tsx'
-import { TypePicker } from '../ui/TypePicker.tsx'
+import { TypeStrip } from '../ui/TypeStrip.tsx'
 
 type Config = Record<string, unknown>
 
@@ -212,24 +214,66 @@ export function EventsPage({ query, onToast }: { query: URLSearchParams; onToast
   return (
     <div className="work">
       <ClearButton onClick={reset} />
+      <TypeStrip
+        label="Tipo"
+        groups={[{ items: [
+          { value: 'Ingresso', label: 'Ingresso', hint: 'E-ticket com QR, setor e preço.', icon: 'ingresso' },
+          { value: 'Credencial', label: 'Credencial', hint: 'Crachá com função e áreas.', icon: 'credencial' },
+          { value: 'Inscrição', label: 'Inscrição', hint: 'Ficha com CPF, idade e pagamento.', icon: 'inscricao' },
+          { value: 'Cupom', label: 'Cupom', hint: 'Desconto com vigência e usos.', icon: 'cupom' },
+        ] }]}
+        value={tipo}
+        onChange={(value) => update('tipo', value)}
+      />
+      <section className="panel preview-bg" id="resultado">
+        <header className="preview-head">
+          <h2>{single ? 'Visualização' : batch ? `Lote com ${batch.length} ${batch.length === 1 ? 'item' : 'itens'}` : 'Lote'}</h2>
+          <div className="lote-actions">
+            {!single && batch ? (
+              <>
+                <IconButton icon="download" tip="Baixar CSV" badge="CSV" onClick={() => { downloadText('eventos.csv', recordsToCsv(asItems(batch)), 'text/csv;charset=utf-8'); onToast(downloadNotice('eventos.csv')) }} />
+                <IconButton icon="download" tip="Baixar JSON" badge="JSON" onClick={() => { downloadText('eventos.json', recordsToJson(asItems(batch)), 'application/json'); onToast(downloadNotice('eventos.json')) }} />
+                <IconButton icon="download" tip="Baixar PDF (um por página)" badge="PDF" onClick={() => pdf(batch, 'eventos.pdf')} />
+                {tipo !== 'Inscrição' ? (
+                  <IconButton icon="image" tip="Baixar os QR Codes (PNG em ZIP)" badge="ZIP" onClick={async () => {
+                    downloadBlob('qr-codes.zip', await qrImagesZip(batch.map((item) => ({ name: fileStem(item), qr: fieldOf(item, 'qr') }))))
+                    onToast(downloadNotice('qr-codes.zip'))
+                  }} />
+                ) : null}
+              </>
+            ) : null}
+            <VaryButton disabled={Boolean(error)} onClick={single ? () => setSeed(Math.floor(Math.random() * 1_000_000_000)) : generateBatch} />
+          </div>
+        </header>
+        {single && preview.map((item, index) => (
+          <ItemView key={index} item={item} tipo={tipo} onCopy={copy} onPdf={() => pdf([item], `${fileStem(item)}.pdf`)} />
+        ))}
+        {!single && !batch ? <p className="muted">Ajuste as regras abaixo e clique nos dadinhos para gerar o lote. Cada item da lista abre o visualizador.</p> : null}
+        {!single && batch ? (
+          <>
+            <p className="verdict-count">{counts.map(([tag, info]) => <span key={tag} className={`tone ${info.tone}`}>{info.count} · {tag}</span>)}</p>
+            <div className="event-list" role="list">
+              {batch.map((item, index) => (
+                <button key={index} type="button" role="listitem" className="event-row" onClick={() => setOpen(index)}>
+                  <code>{fieldOf(item, 'codigo') || fieldOf(item, 'cupom') || fieldOf(item, 'inscricao')}</code>
+                  <span>{fieldOf(item, 'titular') || fieldOf(item, 'nome') || fieldOf(item, 'desconto') || '(sem nome)'}</span>
+                  <span className="muted">{fieldOf(item, 'setor') || fieldOf(item, 'funcao') || fieldOf(item, 'categoria') || `${fieldOf(item, 'inicio')} a ${fieldOf(item, 'fim')}`}</span>
+                  <span className={`tone ${item.tone}`}>{item.tag}</span>
+                  <span className="event-open">Ver →</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
+        {shown.length === 0 && single && error ? <p className="muted">Corrija a configuração para ver o item.</p> : null}
+      </section>
       <section className="step">
-        <header className="step-title"><b>1</b><div><h2>O que gerar</h2><p>Escolha o tipo e se quer um item ou um lote.</p></div></header>
-        <TypePicker
-          label="Tipo"
-          options={[
-            { value: 'Ingresso', label: 'Ingresso', desc: 'E-ticket com QR, setor e preço.', icon: 'ingresso' },
-            { value: 'Credencial', label: 'Credencial', desc: 'Crachá com função e áreas.', icon: 'credencial' },
-            { value: 'Inscrição', label: 'Inscrição', desc: 'Ficha com CPF, idade e pagamento.', icon: 'inscricao' },
-            { value: 'Cupom', label: 'Cupom', desc: 'Desconto com vigência e usos.', icon: 'cupom' },
-          ]}
-          value={tipo}
-          onChange={(value) => update('tipo', value)}
-        />
+        <header className="step-title"><div><h2>Quantidade</h2><p>Um item ou um lote.</p></div></header>
         <FieldList fields={KIND_FIELDS} config={config} onChange={update} />
       </section>
 
       <section className="step">
-        <header className="step-title"><b>2</b><div><h2>O evento</h2><p>Os dados aparecem no ingresso. O código do evento vai dentro do QR e é conferido na aba Validar.</p></div></header>
+        <header className="step-title"><div><h2>O evento</h2><p>Os dados aparecem no ingresso. O código do evento vai dentro do QR e é conferido na aba Validar.</p></div></header>
         <div className="fields">
           <label className="field"><span>Nome do evento</span><input value={String(config.nomeEvento)} onChange={(event) => update('nomeEvento', event.target.value)} /></label>
           <label className="field"><span>Código do evento</span><input value={String(config.evento)} onChange={(event) => update('evento', event.target.value.toUpperCase())} /></label>
@@ -255,7 +299,7 @@ export function EventsPage({ query, onToast }: { query: URLSearchParams; onToast
       </section>
 
       <section className="step">
-        <header className="step-title"><b>3</b><div><h2>{{ Ingresso: 'Setores, tipos e titular', Credencial: 'Funções, área e nome', Inscrição: 'Categorias, valor e idade', Cupom: 'Desconto e usos' }[tipo]}</h2><p>Tudo que ficar vazio é sorteado.</p></div></header>
+        <header className="step-title"><div><h2>{{ Ingresso: 'Setores, tipos e titular', Credencial: 'Funções, área e nome', Inscrição: 'Categorias, valor e idade', Cupom: 'Desconto e usos' }[tipo]}</h2><p>Tudo que ficar vazio é sorteado.</p></div></header>
         {tipo === 'Ingresso' ? (
           <div className="sector-list">
             <span className="sector-head">Setores e preço da inteira</span>
@@ -274,51 +318,11 @@ export function EventsPage({ query, onToast }: { query: URLSearchParams; onToast
       </section>
 
       <section className="step">
-        <header className="step-title"><b>4</b><div><h2>{single ? 'A regra' : 'As regras e o tamanho do lote'}</h2><p>Válido, ou um caso negativo explícito para testar a portaria.</p></div></header>
+        <header className="step-title"><div><h2>{single ? 'A regra' : 'As regras e o tamanho do lote'}</h2><p>Válido, ou um caso negativo explícito para testar a portaria.</p></div></header>
         <FieldList fields={ruleFields(tipo)} config={config} onChange={update} />
         {error ? <p className="banner bad">{error}</p> : null}
-        {single ? (
-          <button id="mf-generate" className="primary" type="button" disabled={Boolean(error)} onClick={() => setSeed(Math.floor(Math.random() * 1_000_000_000))}>Gerar outro</button>
-        ) : (
-          <button id="mf-generate" className="primary" type="button" disabled={Boolean(error)} onClick={generateBatch}>Gerar lote</button>
-        )}
       </section>
 
-      <section className="panel" id="resultado">
-        <header className="preview-head"><h2>{single ? 'Visualização' : batch ? `Lote com ${batch.length} ${batch.length === 1 ? 'item' : 'itens'}` : 'Lote'}</h2></header>
-        {single && preview.map((item, index) => (
-          <ItemView key={index} item={item} tipo={tipo} onCopy={copy} onPdf={() => pdf([item], `${fileStem(item)}.pdf`)} />
-        ))}
-        {!single && !batch ? <p className="muted">Defina as regras e clique em Gerar lote. Cada item da lista abre o visualizador.</p> : null}
-        {!single && batch ? (
-          <>
-            <p className="verdict-count">{counts.map(([tag, info]) => <span key={tag} className={`tone ${info.tone}`}>{info.count} · {tag}</span>)}</p>
-            <div className="event-list" role="list">
-              {batch.map((item, index) => (
-                <button key={index} type="button" role="listitem" className="event-row" onClick={() => setOpen(index)}>
-                  <code>{fieldOf(item, 'codigo') || fieldOf(item, 'cupom') || fieldOf(item, 'inscricao')}</code>
-                  <span>{fieldOf(item, 'titular') || fieldOf(item, 'nome') || fieldOf(item, 'desconto') || '(sem nome)'}</span>
-                  <span className="muted">{fieldOf(item, 'setor') || fieldOf(item, 'funcao') || fieldOf(item, 'categoria') || `${fieldOf(item, 'inicio')} a ${fieldOf(item, 'fim')}`}</span>
-                  <span className={`tone ${item.tone}`}>{item.tag}</span>
-                  <span className="event-open">Ver →</span>
-                </button>
-              ))}
-            </div>
-            <div className="row-actions">
-              <button type="button" onClick={() => { downloadText('eventos.csv', recordsToCsv(asItems(batch)), 'text/csv;charset=utf-8'); onToast(downloadNotice('eventos.csv')) }}>Baixar CSV</button>
-              <button type="button" onClick={() => { downloadText('eventos.json', recordsToJson(asItems(batch)), 'application/json'); onToast(downloadNotice('eventos.json')) }}>Baixar JSON</button>
-              <button type="button" onClick={() => pdf(batch, 'eventos.pdf')}>Baixar PDF (1 por página)</button>
-              {tipo !== 'Inscrição' ? (
-                <button type="button" className="download" onClick={async () => {
-                  downloadBlob('qr-codes.zip', await qrImagesZip(batch.map((item) => ({ name: fileStem(item), qr: fieldOf(item, 'qr') }))))
-                  onToast(downloadNotice('qr-codes.zip'))
-                }}>Baixar os QR Codes (PNG)</button>
-              ) : null}
-            </div>
-          </>
-        ) : null}
-        {shown.length === 0 && single && error ? <p className="muted">Corrija a configuração para ver o item.</p> : null}
-      </section>
 
       {viewing && batch ? (
         <div className="viewer" role="dialog" aria-modal="true" aria-label="Visualizar item" onClick={() => setOpen(null)}>
@@ -351,10 +355,10 @@ function ItemView({ item, tipo, onCopy, onPdf }: { item: EventRow; tipo: EventKi
           <code>{qr}</code>
         </div>
       ) : null}
-      <div className="row-actions">
-        {qr ? <button type="button" onClick={() => onCopy(qr, 'Conteúdo do QR copiado. Cole na aba Validar para conferir.')}>Copiar conteúdo do QR</button> : null}
-        {qr ? <button type="button" onClick={() => downloadBytes(`${fileStem(item)}-qr.png`, qrPngBytes(qr), 'image/png')}>Baixar QR (PNG)</button> : null}
-        <button type="button" onClick={onPdf}>Baixar PDF</button>
+      <div className="lote-actions">
+        {qr ? <IconButton icon="copy" tip="Copiar conteúdo do QR" badge="QR" onClick={() => onCopy(qr, 'Conteúdo do QR copiado. Cole na aba Validar para conferir.')} /> : null}
+        {qr ? <IconButton icon="image" tip="Baixar QR (PNG)" badge="PNG" onClick={() => downloadBytes(`${fileStem(item)}-qr.png`, qrPngBytes(qr), 'image/png')} /> : null}
+        <IconButton icon="download" tip="Baixar PDF" badge="PDF" onClick={onPdf} />
       </div>
       <details className="adv-box">
         <summary>Todos os campos</summary>

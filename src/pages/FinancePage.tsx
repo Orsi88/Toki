@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Notice } from '../ui/browser.ts'
 import { FINANCE_KINDS, financeLabel } from '../ui/finance.ts'
-import { TypePicker } from '../ui/TypePicker.tsx'
+import { TypeStrip } from '../ui/TypeStrip.tsx'
 import { GeneratorPage } from './GeneratorPage.tsx'
 
 // Cartão, PIX, dados bancários e boleto numa tela só: o tipo escolhido no topo abre o gerador dele logo abaixo.
@@ -26,17 +26,13 @@ export function FinancePage({ query, onToast }: { query: URLSearchParams; onToas
 
   return (
     <div className="work">
-      <section className="step">
-        <header className="step-title">
-          <b>1</b>
-          <div>
-            <h2>Escolha o tipo</h2>
-            <p>As opções abaixo mudam conforme o tipo.</p>
-          </div>
-        </header>
-        <TypePicker label="Tipo" options={OPTIONS} value={tipo} onChange={setTipo} />
-      </section>
-      <GeneratorPage key={engine} id={engine} query={new URLSearchParams()} onToast={onToast} firstStep={2} />
+      <TypeStrip
+        label="Tipo"
+        groups={[{ items: OPTIONS.map((option) => ({ value: option.value, label: option.label, icon: option.icon, hint: option.desc })) }]}
+        value={tipo}
+        onChange={setTipo}
+      />
+      <GeneratorPage key={engine} id={engine} query={new URLSearchParams()} onToast={onToast} />
     </div>
   )
 }

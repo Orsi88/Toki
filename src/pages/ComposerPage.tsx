@@ -4,9 +4,10 @@ import { CS, DEFAULT_COMPS, DOC_FIELDS } from '../domain/mfEngine.ts'
 import { buildDocument, type DocComponent, type DocFormat, type DocMeta } from '../domain/documents.ts'
 import { downloadBytes, downloadNotice, type Notice } from '../ui/browser.ts'
 import { ClearButton } from '../ui/ClearButton.tsx'
+import { IconButton } from '../ui/IconButton.tsx'
 import { FieldList, type EngineField } from '../ui/Fields.tsx'
 import { optionIcon } from '../ui/optionIcon.ts'
-import { TypePicker } from '../ui/TypePicker.tsx'
+import { TypeStrip } from '../ui/TypeStrip.tsx'
 
 const FORMATS: DocFormat[] = ['Word', 'Excel', 'PowerPoint', 'PDF']
 const FORMAT_HELP: Record<DocFormat, string> = { Word: 'Texto, tabelas e imagens.', Excel: 'Abas, fórmulas e gráficos.', PowerPoint: 'Slides com lista e gráfico.', PDF: 'Páginas com timbre.' }
@@ -148,24 +149,55 @@ export function ComposerPage({
   return (
     <div className="work">
       <ClearButton disabled={busy} onClick={reset} />
-      <section className="step">
-        <header className="step-title">
-          <b>1</b>
-          <div>
-            <h2>Escolha o formato</h2>
-            <p>Word e PDF saem com o timbre e a marca d’água. Excel e PowerPoint seguem o formato de cada um.</p>
-          </div>
+      <TypeStrip
+        label="Formato do documento"
+        groups={[{ items: FORMATS.map((item) => ({ value: item, label: item, hint: FORMAT_HELP[item], icon: optionIcon(item) })) }]}
+        value={current}
+        onChange={(value) => changeFormat(value as DocFormat)}
+      />
+      <section className="panel preview-bg" id="resultado">
+        <header className="preview-head">
+          <h2>Revisão</h2>
+          <IconButton
+            icon="download"
+            primary
+            tip={busy ? 'Montando o documento…' : `Gerar e baixar o ${current}`}
+            badge={({ Word: 'DOCX', Excel: 'XLSX', PowerPoint: 'PPTX', PDF: 'PDF' } as Record<string, string>)[current]}
+            disabled={busy}
+            onClick={generate}
+          />
         </header>
-        <TypePicker
-          label="Formato do documento"
-          value={current}
-          options={FORMATS.map((item) => ({ value: item, label: item, desc: FORMAT_HELP[item], icon: optionIcon(item) }))}
-          onChange={(value) => changeFormat(value as DocFormat)}
-        />
+        <p className="muted">{components.length} componente(s) em {current}. Esta página é a revisão do que entra no arquivo.</p>
+        <article className={`doc-page ${current === 'PowerPoint' ? 'wide' : ''}`}>
+          {components.length === 0 ? <p className="muted">Adicione um componente para ver a revisão.</p> : null}
+          {components.map((component) => {
+            const label = componentsCatalog[component.type]?.label || component.type
+            const text = String(component.props.texto || component.props.nome || component.props.url || '')
+            return (
+              <div key={component.id} className={`doc-block ${component.type}`}>
+                {component.type === 'titulo' || component.type === 'slide' ? <h3>{text || label}</h3> : null}
+                {component.type === 'subtitulo' ? <h4>{text || label}</h4> : null}
+                {component.type === 'paragrafo' ? <p>{text || 'Parágrafo de teste para importação.'}</p> : null}
+                {component.type === 'lista' ? <ul><li>Item de teste 1</li><li>Item de teste 2</li><li>Item de teste 3</li></ul> : null}
+                {component.type === 'tabela' || component.type === 'aba' || component.type === 'grafico' ? (
+                  <table>
+                    <thead><tr><th>Coluna 1</th><th>Coluna 2</th><th>Coluna 3</th></tr></thead>
+                    <tbody><tr><td>A</td><td>B</td><td>C</td></tr><tr><td>D</td><td>E</td><td>F</td></tr></tbody>
+                  </table>
+                ) : null}
+                {component.type === 'imagem' ? <div className="doc-image">Imagem de exemplo</div> : null}
+                {component.type === 'formula' ? <p className="mono">{text || String(component.props.func || 'Fórmula')}</p> : null}
+                {component.type === 'cabecalho' || component.type === 'rodape' || component.type === 'comentario' || component.type === 'link' || component.type === 'quebra' ? (
+                  <p className="muted">{label}{text ? ` — ${text}` : ''}</p>
+                ) : null}
+              </div>
+            )
+          })}
+        </article>
+        {notes.map((note) => <p key={note} className="banner">{note}</p>)}
       </section>
       <section className="step">
         <header className="step-title">
-          <b>2</b>
           <div>
             <h2>Defina as propriedades do documento</h2>
             <p>Nome, metadados e página usados na geração.</p>
@@ -175,7 +207,6 @@ export function ComposerPage({
       </section>
       <section className="step">
         <header className="step-title">
-          <b>3</b>
           <div>
             <h2>Organize a estrutura dos componentes</h2>
             <p>A ordem da lista é a ordem do arquivo.</p>
@@ -243,40 +274,6 @@ export function ComposerPage({
           </div>,
           document.body,
         ) : null}
-        <button id="mf-generate" className="primary" type="button" disabled={busy} onClick={generate}>
-          {busy ? 'Montando...' : 'Gerar documento'}
-        </button>
-      </section>
-      <section className="panel" id="resultado">
-        <h2>Revisão</h2>
-        <p className="muted">{components.length} componente(s) em {current}. Esta página é a revisão do que entra no arquivo.</p>
-        <article className={`doc-page ${current === 'PowerPoint' ? 'wide' : ''}`}>
-          {components.length === 0 ? <p className="muted">Adicione um componente para ver a revisão.</p> : null}
-          {components.map((component) => {
-            const label = componentsCatalog[component.type]?.label || component.type
-            const text = String(component.props.texto || component.props.nome || component.props.url || '')
-            return (
-              <div key={component.id} className={`doc-block ${component.type}`}>
-                {component.type === 'titulo' || component.type === 'slide' ? <h3>{text || label}</h3> : null}
-                {component.type === 'subtitulo' ? <h4>{text || label}</h4> : null}
-                {component.type === 'paragrafo' ? <p>{text || 'Parágrafo de teste para importação.'}</p> : null}
-                {component.type === 'lista' ? <ul><li>Item de teste 1</li><li>Item de teste 2</li><li>Item de teste 3</li></ul> : null}
-                {component.type === 'tabela' || component.type === 'aba' || component.type === 'grafico' ? (
-                  <table>
-                    <thead><tr><th>Coluna 1</th><th>Coluna 2</th><th>Coluna 3</th></tr></thead>
-                    <tbody><tr><td>A</td><td>B</td><td>C</td></tr><tr><td>D</td><td>E</td><td>F</td></tr></tbody>
-                  </table>
-                ) : null}
-                {component.type === 'imagem' ? <div className="doc-image">Imagem de exemplo</div> : null}
-                {component.type === 'formula' ? <p className="mono">{text || String(component.props.func || 'Fórmula')}</p> : null}
-                {component.type === 'cabecalho' || component.type === 'rodape' || component.type === 'comentario' || component.type === 'link' || component.type === 'quebra' ? (
-                  <p className="muted">{label}{text ? ` — ${text}` : ''}</p>
-                ) : null}
-              </div>
-            )
-          })}
-        </article>
-        {notes.map((note) => <p key={note} className="banner">{note}</p>)}
       </section>
     </div>
   )

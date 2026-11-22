@@ -1,9 +1,13 @@
 import { useMemo, useState } from 'react'
 import { FAM, FILE_DEF, FILE_FIELDS, fmtBytes } from '../domain/mfEngine.ts'
-import { FILE_BYTE_LIMIT, FILE_COUNT_LIMIT, FILE_TOTAL_LIMIT, generateFiles, validateFileRequest, zipArtifacts, folderPreview, sanitizeFolder, type FileRequest, type FolderMode } from '../domain/files.ts'
+import { FILE_BYTE_LIMIT, FILE_COUNT_LIMIT, FILE_TOTAL_LIMIT, generateFiles, validateFileRequest, zipArtifacts, folderTree, sanitizeFolder, type FileRequest, type FolderMode } from '../domain/files.ts'
 import { downloadBlob, downloadNotice, type Notice } from '../ui/browser.ts'
-import { FieldList, type EngineField } from '../ui/Fields.tsx'
+import { FieldList, fieldOptions, type EngineField } from '../ui/Fields.tsx'
+import { optionIcon } from '../ui/optionIcon.ts'
+import { TypeStrip } from '../ui/TypeStrip.tsx'
 import { ClearButton } from '../ui/ClearButton.tsx'
+import { FolderView } from '../ui/FolderView.tsx'
+import { IconButton } from '../ui/IconButton.tsx'
 import { SearchField } from '../ui/SearchField.tsx'
 
 export function FilesPage({
@@ -74,7 +78,6 @@ export function FilesPage({
     }
   }
 
-  const preview = folderPreview(selected, request)
   const fieldConfig = {
     ...config,
     _audio: selected.includes('WAV'),
@@ -97,12 +100,29 @@ export function FilesPage({
     onToast('Configurações e prévia limpas.')
   }
 
+  const contentField = (FILE_FIELDS as EngineField[]).find((field) => field.cards)
+
   return (
     <div className="work">
       <ClearButton disabled={busy} onClick={reset} />
+      {contentField ? (
+        <TypeStrip
+          label="Conteúdo dos arquivos"
+          groups={[{ items: fieldOptions(contentField, fieldConfig).map((option: string) => ({ value: option, label: option, icon: optionIcon(option) })) }]}
+          value={String((fieldConfig as Record<string, unknown>)[contentField.k] ?? '')}
+          onChange={(value: string) => setConfig((current) => ({ ...current, [contentField.k]: value }))}
+        />
+      ) : null}
+      <section className="panel" id="resultado" aria-labelledby="files-preview">
+        <header className="preview-head">
+          <h2 id="files-preview">Prévia</h2>
+          <IconButton icon="download" primary tip={busy ? progress || 'Gerando…' : error || 'Gerar e baixar os arquivos'} disabled={Boolean(error) || busy} onClick={generate} />
+        </header>
+        {busy ? <p className="muted" role="status">{progress || 'Gerando…'}</p> : null}
+        {selected.length ? <FolderView tree={folderTree(selected, request)} rootLabel="Lote baixado" /> : <p className="muted">Selecione ao menos uma extensão abaixo.</p>}
+      </section>
       <section className="step">
         <header className="step-title">
-          <b>1</b>
           <h2>Selecione os tipos de extensão</h2>
         </header>
         <SearchField
@@ -137,18 +157,16 @@ export function FilesPage({
       </section>
       <section className="step">
         <header className="step-title">
-          <b>2</b>
           <h2>Defina as configurações e propriedades dos arquivos</h2>
         </header>
         <FieldList
-          fields={FILE_FIELDS as EngineField[]}
+          fields={(FILE_FIELDS as EngineField[]).filter((field) => field !== contentField)}
           config={fieldConfig}
           onChange={(name, value) => setConfig((current) => ({ ...current, [name]: value }))}
         />
       </section>
       <section className="step">
         <header className="step-title">
-          <b>3</b>
           <h2>Defina e configure a estrutura e organização das pastas</h2>
         </header>
         <div className="fields">
@@ -168,11 +186,7 @@ export function FilesPage({
             </label>
           ) : null}
         </div>
-        <pre className="tree">{preview}</pre>
         {error ? <p className="banner bad">{error}</p> : null}
-        <button id="mf-generate" className="primary" type="button" disabled={Boolean(error) || busy} onClick={generate}>
-          {busy ? progress || 'Gerando...' : 'Gerar arquivos'}
-        </button>
         <p className="muted file-limits">
           Até {FILE_COUNT_LIMIT.toLocaleString('pt-BR')} arquivos e {fmtBytes(FILE_TOTAL_LIMIT)} por lote, com no máximo {fmtBytes(FILE_BYTE_LIMIT)} por arquivo.
           Tudo é gerado no seu navegador, então lotes grandes usam bastante memória e podem levar alguns minutos.

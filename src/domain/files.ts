@@ -47,6 +47,27 @@ export function familyName(extension: string) {
   return families.find((family) => family.exts.includes(extension.toUpperCase()))?.n ?? 'Outros'
 }
 
+export type FolderNode = { name: string; path: string; dirs: FolderNode[]; files: { name: string; ext: string; count: number }[] }
+
+// Árvore de pastas que o lote vai gerar (o visualizador da prévia desenha a partir dela).
+export function folderTree(selected: string[], request: FileRequest): FolderNode {
+  const root: FolderNode = { name: '', path: '', dirs: [], files: [] }
+  for (const extension of selected) {
+    const folder = folderPath(request.folderMode ?? 'raiz', request.folderName ?? 'arquivos_teste', extension)
+    let node = root
+    for (const part of folder.split('/').filter(Boolean)) {
+      let next = node.dirs.find((dir) => dir.name === part)
+      if (!next) {
+        next = { name: part, path: node.path ? `${node.path}/${part}` : part, dirs: [], files: [] }
+        node.dirs.push(next)
+      }
+      node = next
+    }
+    node.files.push({ name: fileName({ ...request }, extension, ''), ext: extension.toUpperCase(), count: Math.max(1, request.qtd) })
+  }
+  return root
+}
+
 export function folderPreview(selected: string[], request: FileRequest) {
   if (!selected.length) return 'Nenhuma extensão selecionada.'
   type Branch = { dirs: Map<string, Branch>; files: string[] }

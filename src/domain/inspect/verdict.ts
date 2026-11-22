@@ -1,8 +1,13 @@
-// Formato comum da aba Validar: cada entrada vira um veredito com a lista do que foi conferido.
+// Formato comum da aba Validar: cada entrada vira uma ficha de PROPRIEDADES. A aba não julga se o dado tem
+// problema; só conferências com cálculo (dígitos verificadores, Luhn, CRC, EAN/UPC) dizem válido ou inválido.
 
 export type Tone = 'ok' | 'bad' | 'warn'
-export type Check = { label: string; tone: Tone; detail: string }
-export type Verdict = { input: string; title: string; tone: Tone; summary: string; checks: Check[] }
+export type Check = { label: string; tone: Tone; detail: string; calc?: boolean }
+/** calc: resultado do cálculo (ou da portaria simulada dos eventos do Toki); undefined quando só há propriedades. */
+export type Verdict = { input: string; title: string; tone: Tone; summary: string; checks: Check[]; calc?: string }
+
+// Conferências que são conta (algoritmo verificável), não regra de negócio.
+export const CALC_LABELS = new Set(['Dígitos verificadores', 'Luhn', 'CRC16', 'DV geral', 'EAN-13', 'EAN-8', 'UPC-A'])
 export type Labels = { ok: string; bad: string; warn: string }
 export type Outcome = { verdicts: Verdict[]; error?: string }
 
@@ -20,15 +25,25 @@ export function warn(label: string, detail: string): Check {
   return { label, tone: 'warn', detail }
 }
 
-export function verdict(input: string, checks: Check[], labels: Labels = VALID): Verdict {
+// Portaria simulada dos eventos gerados pelo Toki (assinatura do QR + regras do próprio evento): ali
+// "liberada/barrada" é o resultado da conta. Nenhum outro validador usa esta função.
+export function portaria(input: string, checks: Check[], labels: Labels): Verdict {
   const tone: Tone = checks.some((check) => check.tone === 'bad') ? 'bad' : checks.some((check) => check.tone === 'warn') ? 'warn' : 'ok'
-  const failed = checks.filter((check) => check.tone === tone && tone !== 'ok').map((check) => check.label.toLocaleLowerCase('pt-BR'))
+  return { input, title: labels[tone], tone, summary: '', checks, calc: labels[tone] }
+}
+
+// Ficha de propriedades. O terceiro argumento é ignorado de propósito: rótulos de veredito não valem aqui.
+export function verdict(input: string, checks: Check[], _labels?: Labels): Verdict {
+  const marked = checks.map((check) => (CALC_LABELS.has(check.label) ? { ...check, calc: true } : check))
+  const calcs = marked.filter((check) => check.calc)
+  const calc = calcs.length ? (calcs.some((check) => check.tone !== 'ok') ? 'Inválido' : 'Válido') : undefined
   return {
     input,
-    title: labels[tone],
-    tone,
-    summary: tone === 'ok' ? 'Todas as conferências passaram.' : `${tone === 'bad' ? 'Falhou em' : 'Atenção em'}: ${failed.join(', ')}.`,
-    checks,
+    title: calc ?? 'Propriedades',
+    tone: calc === 'Inválido' ? 'bad' : 'ok',
+    summary: '',
+    checks: marked,
+    calc,
   }
 }
 

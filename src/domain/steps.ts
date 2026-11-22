@@ -5,6 +5,10 @@ export const STEPS: Record<string, [string, string, string[], string[]?][]> = {
     ['Defina a pessoa', 'Campos vazios são sorteados. Brasileira mantém CPF, DDD e CEP coerentes. Estrangeira usa passaporte, telefone e endereço do país de origem.', ['origem', 'genero', 'nome', 'sobrenome', 'idadeMin', 'idadeMax', 'uf', 'cidade', 'pais']],
     ['Formatação e regras de validade', 'Todos os campos saem válidos por padrão. Mude um deles para gerar um caso negativo.', ['mask', 'fmtData', 'emailNome', 'dominio'], ['rCpf', 'rEmail', 'rTel', 'rCep', 'rNasc']],
   ],
+  empresa: [
+    ['Defina a empresa', 'Natureza jurídica e estado; nome, porte, abertura, contato e endereço são sorteados de forma coerente.', ['natureza', 'uf']],
+    ['CNPJ', 'Válido por padrão; inválido troca o último dígito verificador.', ['regra', 'mask', 'filial']],
+  ],
   cpf: [
     ['Escolha a regra de geração', 'Defina se o CPF deve passar ou falhar na validação.', ['regra']],
     ['Defina formatação e origem', 'Como o número é exibido e de qual região fiscal ele parece vir.', ['mask', 'uf']],
@@ -37,7 +41,7 @@ export const STEPS: Record<string, [string, string, string[], string[]?][]> = {
     ['Defina o formato', 'Formato de exibição da data.', ['formato']],
   ],
   numero: [
-    ['Escolha o tipo de valor', 'Inteiro, decimal, porcentagem, monetário, cor, medida ou sequência.', ['tipo', 'sinal', 'repr', 'origemCor', 'corBase', 'alfa', 'regraCor', 'unidade', 'converter']],
+    ['Opções do tipo', 'Sinal, cor, medida, fórmula ou função, conforme o tipo escolhido acima.', ['tipo', 'sinal', 'repr', 'origemCor', 'corBase', 'alfa', 'regraCor', 'unidade', 'converter', 'complexidade', 'regraExpr', 'idioma', 'regraForm', 'quadrante', 'funcao']],
     ['Defina o intervalo', 'Usado na geração e na explicação de cada valor.', ['min', 'max', 'ordem', 'passo']],
     ['Selecione a regra que deseja testar', 'Valores dentro do intervalo, fora dele ou repetidos. Todas as variações junta cada regra.', ['regra', 'unicos']],
     ['Formatação', 'Casas decimais e separadores.', ['casas', 'sep', 'milhar']],
@@ -64,7 +68,7 @@ export const STEPS: Record<string, [string, string, string[], string[]?][]> = {
     ['Configure a regra', 'DV correto, DV quebrado ou comprimento inválido. Todas as variações junta cada caso.', ['regra'], ['mask']],
   ],
   borda: [
-    ['Configure o caso de borda', 'Escolha um tipo ou Todas as variações para montar uma massa com cada caso. O limite vale para comprimento e valor.', ['regra', 'limite']],
+    ['Configure o limite', 'Para comprimento e valor: o lado (máximo ou mínimo) e o limite. Saem valores logo abaixo, no limite e logo acima.', ['lado', 'limite']],
   ],
   texto: [
     ['Escolha o tipo de texto', 'A história do bichinho é a base. A prévia muda junto com as opções.', ['modo', 'padrao']],

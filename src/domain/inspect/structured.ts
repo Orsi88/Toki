@@ -320,7 +320,7 @@ export function validateStructured(text: string, format: string): Outcome {
   if (!text.trim()) return emptyInput('Cole o conteúdo, envie um arquivo ou leia a imagem de um QR Code.')
   const chosen = format === 'Detectar' ? detectFormat(text) : format
   const labels = { ok: `${chosen} válido`, bad: `${chosen} inválido`, warn: `${chosen} com ressalva` }
-  const detected = format === 'Detectar' ? [ok('Formato', `Detectado como ${chosen}.`)] : []
+  const detected = format === 'Detectar' ? [ok('Reconhecido como', chosen)] : []
   if (chosen === 'Código de barras') return { verdicts: lines(text).map((line) => verdict(line, checkBarcode(line), { ok: 'Código válido', bad: 'Código inválido', warn: 'Código com ressalva' })) }
   const checks = chosen === 'JSON' ? checkJson(text) : chosen === 'XML' ? checkXml(text) : chosen === 'YAML' ? checkYaml(text) : chosen === 'SQL' ? checkSql(text) : checkCsv(text)
   return { verdicts: [verdict(`${text.trim().slice(0, 80)}${text.trim().length > 80 ? '…' : ''}`, [...detected, ...checks], labels)] }
